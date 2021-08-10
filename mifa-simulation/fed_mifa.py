@@ -61,8 +61,8 @@ def reg_mifa(sel_idx,learning_rate,criterion, dtrain_loader, tau,client_state_di
         prev_weights = temp_state_dict[key].type(torch.DoubleTensor)
         new_weights =client_state_dict[sel_idx][key].type(torch.DoubleTensor) #gradient after tau local epochs
         current_grad = (prev_weights/lr) - (new_weights/lr)
-        update = (current_grad/p_i[sel_idx]) - ((1-(1/p_i[sel_idx]))*client_prev_state_dict[key])  # gradient - prev gradient
-        client_prev_state_dict[key] = client_state_dict[sel_idx][key]= update #set prev gradient to current gradient
+        client_state_dict[sel_idx][key] = current_grad - client_prev_state_dict[key]  # gradient - prev gradient
+        client_prev_state_dict[key] = current_grad #set prev gradient to current gradient
     client_prev_model_dict[sel_idx].load_state_dict(client_prev_state_dict)
     return loss,client_state_dict
 
@@ -118,6 +118,8 @@ def unbiased_mifa(sel_idx,learning_rate,criterion, dtrain_loader, tau,client_sta
         prev_weights = temp_state_dict[key].type(torch.DoubleTensor)
         new_weights =client_state_dict[sel_idx][key].type(torch.DoubleTensor) #gradient after tau local epochs
         current_grad = (prev_weights/lr) - (new_weights/lr)
+        # update = (current_grad/p_i[sel_idx]) - ((1-(1/p_i[sel_idx]))*client_prev_state_dict[key])  # gradient - prev gradient
+        # client_prev_state_dict[key] = client_state_dict[sel_idx][key]= update #set prev gradient to current gradient
         client_state_dict[sel_idx][key] = (current_grad - client_prev_state_dict[key])  # gradient - prev gradient
         client_prev_state_dict[key] = current_grad #set prev gradient to current gradient
     client_prev_model_dict[sel_idx].load_state_dict(client_prev_state_dict)
@@ -290,7 +292,7 @@ for n_c in no_of_c:
                         exit(1)
                     
                     d_train_losses+=loss
-                d_train_losses = d_train_losses/n_c
+                d_train_losses = d_train_losses/len(idxs_users)
 
                 print("Round_%d Loss:%f Algo:%d\n\n"%(rnd,d_train_losses,algo))
 
