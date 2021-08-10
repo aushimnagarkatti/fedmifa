@@ -201,7 +201,7 @@ class FMNIST(Dataset):
             j = self.dataset[c_i]['y'][0]
             p_i = (pmin * j/9) + (1-pmin)  #pmin is 0.1
             probs.append(p_i)
-        return probs/sum(probs)
+        return probs
 
           
     def __len__(self):

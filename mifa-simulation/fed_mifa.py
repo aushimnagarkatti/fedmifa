@@ -118,10 +118,10 @@ def unbiased_mifa(sel_idx,learning_rate,criterion, dtrain_loader, tau,client_sta
         prev_weights = temp_state_dict[key].type(torch.DoubleTensor)
         new_weights =client_state_dict[sel_idx][key].type(torch.DoubleTensor) #gradient after tau local epochs
         current_grad = (prev_weights/lr) - (new_weights/lr)
-        # update = (current_grad/p_i[sel_idx]) - ((1-(1/p_i[sel_idx]))*client_prev_state_dict[key])  # gradient - prev gradient
-        # client_prev_state_dict[key] = client_state_dict[sel_idx][key]= update #set prev gradient to current gradient
-        client_state_dict[sel_idx][key] = (current_grad - client_prev_state_dict[key])  # gradient - prev gradient
-        client_prev_state_dict[key] = current_grad #set prev gradient to current gradient
+        update = (current_grad/p_i[sel_idx]) - ((1-(1/p_i[sel_idx]))*client_prev_state_dict[key])  # gradient - prev gradient
+        client_prev_state_dict[key] = client_state_dict[sel_idx][key]= update #set prev gradient to current gradient
+        # client_state_dict[sel_idx][key] = (current_grad - client_prev_state_dict[key])  # gradient - prev gradient
+        # client_prev_state_dict[key] = current_grad #set prev gradient to current gradient
     client_prev_model_dict[sel_idx].load_state_dict(client_prev_state_dict)
     return loss,client_state_dict
 
@@ -197,7 +197,7 @@ batch_size=config.batch_size
 n_rnds=config.n_rnds
 tau=config.tau
 local_m=config.local_m
-no_of_c=[10,20,30,40,50,60]#no of clients to choose in each round
+no_of_c=[1]#no of clients to choose in each round
 
 
 train_data,test_data,p_i = data.init_dataset()
@@ -254,6 +254,7 @@ for n_c in no_of_c:
 
             #Global epochs
             for rnd in range(n_rnds): # each communication round
+
                 if(rnd==0):
                     idxs_users = client_names
                 elif config.choose_nc == True:
@@ -264,7 +265,7 @@ for n_c in no_of_c:
                         if np.random.choice([True, False],p=[p_i[c],1-p_i[c]]) ==True: 
                             idxs_users.append(c)
                 print("chosen clients",idxs_users)
-                
+                idxs_len=len(idxs_users)
                 #Obtain global weights
                 global_state_dict=model.state_dict()
             
@@ -292,8 +293,7 @@ for n_c in no_of_c:
                         exit(1)
                     
                     d_train_losses+=loss
-                d_train_losses = d_train_losses/len(idxs_users)
-
+                d_train_losses = d_train_losses/idxs_len
                 print("Round_%d Loss:%f Algo:%d\n\n"%(rnd,d_train_losses,algo))
 
 
@@ -302,7 +302,7 @@ for n_c in no_of_c:
 
                 denom = local_m
                 if(algo==3):
-                    denom = n_c
+                    denom = idxs_len
                     for key in global_average_state_dict:
                         global_average_state_dict[key] = torch.zeros(global_average_state_dict[key].size())
                 
@@ -324,7 +324,7 @@ for n_c in no_of_c:
                         client_prev_state_dict = copy.deepcopy(client_prev_model_dict[clients].state_dict()) #previous gradient of client                      
                         for key in clienti_local_state_dict:                        
                             saga_update = saga_global_av_sd[key] + clienti_local_state_dict[key] -(client_prev_state_dict[key] * ((local_m+1)/local_m)) #update weights from averaged grad
-                            global_state_dict[key] -= (global_lr*saga_update)/n_c
+                            global_state_dict[key] -= (global_lr*saga_update)/idxs_len
                         client_prev_model_dict[clients].load_state_dict(clienti_local_state_dict)
                 #At this point, saga_global_av_sd has  (curr grad - prev_grad + average of all grads /n )     
                 #Only update is remaining
@@ -335,8 +335,10 @@ for n_c in no_of_c:
                 model.load_state_dict(global_state_dict)
             loss_algo.append(local_rnd_loss)  
         loss_eachlr.append(loss_algo)
-                
-    plot(loss_eachlr,n_c)
+    if(config.choose_nc):
+        plot(loss_eachlr,n_c)            
+    else:
+        plot(loss_eachlr,'paper')
 
             
             
