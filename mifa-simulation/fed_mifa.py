@@ -107,6 +107,7 @@ def unbiased_mifa(sel_idx,learning_rate,criterion, dtrain_loader, tau,client_sta
 
     #Train for tau local epochs
     loss=train(client_model_dict[sel_idx],learning_rate,criterion, dtrain_loader, tau)
+
     client_state_dict[sel_idx] = copy.deepcopy(dict(client_model_dict[sel_idx].state_dict())) #trained model weights
     client_stalegrad_state_dict = client_stalegrad_model_dict[sel_idx].state_dict() #holds the stale gradient of client
     for key in client_state_dict[sel_idx]:
@@ -114,8 +115,8 @@ def unbiased_mifa(sel_idx,learning_rate,criterion, dtrain_loader, tau,client_sta
         new_weights =client_state_dict[sel_idx][key].type(torch.DoubleTensor) #gradient after tau local epochs
         current_grad = (prev_weights/lr) - (new_weights/lr)
         update = current_grad - client_stalegrad_state_dict[key]  # gradient - prev gradient
-        client_stalegrad_state_dict[key] = client_state_dict[sel_idx][key]= update #set prev gradient to current gradient
-     
+        client_state_dict[sel_idx][key]= update #set prev gradient to current gradient
+        client_stalegrad_state_dict[key] =current_grad
     client_stalegrad_model_dict[sel_idx].load_state_dict(client_stalegrad_state_dict)
     return loss,client_state_dict
 
@@ -208,7 +209,7 @@ for choose_nc in config.no_of_c:
     for learning_rate in possible_lr:
         lr=learning_rate
         loss_algo=[]  
-        gamma = learning_rate/3
+        gamma = learning_rate
 
         #Run simulation for each algorithm
         for algo in list(d_algo.keys()):      
@@ -275,7 +276,7 @@ for choose_nc in config.no_of_c:
                     if algo ==0:
                         loss, stalegrads_state_dict= reg_mifa(sel_idx,lr,criterion, dtrain_loader, tau, stalegrads_state_dict)
                     elif algo ==1: 
-                        loss, stalegrads_state_dict= unbiased_mifa(sel_idx,lr,criterion, dtrain_loader, tau, stalegrads_state_dict)
+                        loss, stalegrads_state_dict= reg_mifa(sel_idx,lr,criterion, dtrain_loader, tau, stalegrads_state_dict)
                     elif algo ==2:
                         loss, stalegrads_state_dict= saga_agg(sel_idx,lr,criterion, dtrain_loader, tau, stalegrads_state_dict) #we want to return stale 
                     elif algo == 3:
@@ -309,16 +310,18 @@ for choose_nc in config.no_of_c:
                     for key in global_average_state_dict:      
                         global_average_state_dict[key] += (clienti_local_state_dict[key]/denom)
                 
-                saga_global_av_sd = copy.deepcopy(global_average_state_dict) 
+                s_global_av_sd = copy.deepcopy(global_average_state_dict) 
 
-                global_lr = learning_rate
+                global_lr = lr
+
+                #only for saga
                 if (algo==2):
                     global_lr = gamma
                     for clients in idxs_users:
                         clienti_local_state_dict =copy.deepcopy(stalegrads_state_dict[clients])
                         client_prev_state_dict = copy.deepcopy(client_stalegrad_model_dict[clients].state_dict()) #previous gradient of client                      
                         for key in clienti_local_state_dict:                        
-                            saga_update = saga_global_av_sd[key] + clienti_local_state_dict[key] -(client_prev_state_dict[key] * ((local_m+1)/local_m)) #update weights from averaged grad
+                            saga_update = s_global_av_sd[key] + clienti_local_state_dict[key] -(client_prev_state_dict[key] * ((local_m+1)/local_m)) #update weights from averaged grad
                             global_state_dict[key] -= (global_lr*saga_update)/idxs_len
                         client_stalegrad_model_dict[clients].load_state_dict(clienti_local_state_dict)
 
@@ -326,9 +329,11 @@ for choose_nc in config.no_of_c:
                 #Only update is remaining
                 else:                   
                     for key in global_state_dict:
-                        global_state_dict[key] -= (global_lr*saga_global_av_sd[key]) #update weights from averaged grad
+                        global_state_dict[key] -= (global_lr*s_global_av_sd[key]) #update weights from averaged grad
             
                 model.load_state_dict(global_state_dict)
+                if(rnd==100):
+                    lr = lr/2
             loss_algo.append(local_rnd_loss)  
         loss_eachlr.append(loss_algo)
     
