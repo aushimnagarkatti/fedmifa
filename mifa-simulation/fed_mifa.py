@@ -186,6 +186,7 @@ def plot(global_loss,n_c):
             os.mkdir("n_c_"+str(n_c))
         plt.savefig(dir_name)
         i+=1
+    #plt.close()
 
 
 # In[10]:
@@ -197,16 +198,16 @@ batch_size=config.batch_size
 n_rnds=config.n_rnds
 tau=config.tau
 local_m=config.local_m
-no_of_c=[1]#no of clients to choose in each round
+
 
 
 train_data,test_data,p_i = data.init_dataset()
 stalegrads_state_dict={}
-possible_lr=[1,0.5,0.1, 0.05,0.025] 
+possible_lr=config.possible_lr
 d_algo = {
     0: "MIFA",
     1: "UMIFA",
-    2: "SAGA",
+    #2: "SAGA",
     3: "FedAvg"
 }
 
@@ -215,7 +216,7 @@ d_algo = {
 # 2 corresponds to sarah
 # 3 corresponds to fedavg
  
-for n_c in no_of_c:
+for choose_nc in config.no_of_c:
     loss_eachlr=[] 
     for learning_rate in possible_lr:
         lr=learning_rate
@@ -256,14 +257,14 @@ for n_c in no_of_c:
             for rnd in range(n_rnds): # each communication round
 
                 if(rnd==0):
-                    idxs_users = client_names
-                elif config.choose_nc == True:
-                    idxs_users = np.random.choice(client_names,n_c,replace = False,p=p_i/sum(p_i))
-                else:
+                    idxs_users = client_names                
+                elif choose_nc == 'paper':
                     idxs_users=[]
                     for c in client_names:
                         if np.random.choice([True, False],p=[p_i[c],1-p_i[c]]) ==True: 
                             idxs_users.append(c)
+                else:
+                    idxs_users = np.random.choice(client_names,choose_nc,replace = False,p=p_i/sum(p_i))
                 print("chosen clients",idxs_users)
                 idxs_len=len(idxs_users)
                 #Obtain global weights
@@ -335,10 +336,9 @@ for n_c in no_of_c:
                 model.load_state_dict(global_state_dict)
             loss_algo.append(local_rnd_loss)  
         loss_eachlr.append(loss_algo)
-    if(config.choose_nc):
-        plot(loss_eachlr,n_c)            
-    else:
-        plot(loss_eachlr,'paper')
+    
+    plot(loss_eachlr,choose_nc)            
+    
 
             
             
