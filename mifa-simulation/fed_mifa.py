@@ -24,8 +24,8 @@ import os
 
 def test(model,test_data_loader):
     
-    acc=0
-    samples=0
+    pred =[]
+    actuals = []
     l=len(test_data_loader)
 
     #Local epochs
@@ -33,13 +33,12 @@ def test(model,test_data_loader):
         test_X, lab=next(iter(test_data_loader))
                 
         #forward
-        out=model.forward(test_X)
-        for i in range(len(lab)):
-            if(torch.argmax(out[i])==lab[i]):
-                acc+=1
-                samples+=0
-
-    return acc/samples
+        out=torch.argmax(model.forward(test_X), axis = 1)
+        pred.extend(out)
+        actuals.extend(lab)
+    print(len(pred),len(actuals))
+    accuracy = torch.count_nonzero(torch.Tensor(pred)== torch.Tensor(actuals))
+    return accuracy/len(pred)
 
 
 #Regular MIFA
@@ -100,25 +99,27 @@ def saga(sel_idx,learning_rate,criterion, dtrain_loader, tau,client_state_dict):
 
 
 #Unbiased MIFA
-def unbiased_mifa(sel_idx,learning_rate,criterion, dtrain_loader, tau,client_state_dict):
+def unbiased_mifa(sel_idx,learning_rate,criterion, dtrain_loader, tau,client_newweights):
 
     #copy model weights
-    temp_state_dict = copy.deepcopy(dict(client_model_dict[sel_idx].state_dict()))
+    client_i_weights = copy.deepcopy(dict(client_model_dict[sel_idx].state_dict()))
 
     #Train for tau local epochs
     loss=train(client_model_dict[sel_idx],learning_rate,criterion, dtrain_loader, tau)
 
-    client_state_dict[sel_idx] = copy.deepcopy(dict(client_model_dict[sel_idx].state_dict())) #trained model weights
-    client_stalegrad_state_dict = client_stalegrad_model_dict[sel_idx].state_dict() #holds the stale gradient of client
-    for key in client_state_dict[sel_idx]:
-        prev_weights = temp_state_dict[key].type(torch.DoubleTensor)
-        new_weights =client_state_dict[sel_idx][key].type(torch.DoubleTensor) #gradient after tau local epochs
+    client_newweights[sel_idx] = copy.deepcopy(dict(client_model_dict[sel_idx].state_dict())) #trained model weights
+    client_i_stalegrad = client_stalegrad_model_dict[sel_idx].state_dict() #holds the stale gradient of client
+    for key in client_newweights[sel_idx]:
+        prev_weights = client_i_weights[key].type(torch.DoubleTensor)
+        new_weights =client_newweights[sel_idx][key].type(torch.DoubleTensor) #gradient after tau local epochs
         current_grad = (prev_weights/lr) - (new_weights/lr)
-        update = current_grad - client_stalegrad_state_dict[key]  # gradient - prev gradient
-        client_state_dict[sel_idx][key]= update #set prev gradient to current gradient
-        client_stalegrad_state_dict[key] =current_grad
-    client_stalegrad_model_dict[sel_idx].load_state_dict(client_stalegrad_state_dict)
-    return loss,client_state_dict
+        update = current_grad - client_i_stalegrad[key]  # gradient - prev gradient
+
+        #set prev gradient to current gradient
+        client_newweights[sel_idx][key]= update 
+        client_i_stalegrad[key] =current_grad
+    client_stalegrad_model_dict[sel_idx].load_state_dict(client_i_stalegrad)
+    return loss,client_newweights
 
 #FedAvg
 def fedavg(sel_idx,learning_rate,criterion, dtrain_loader, tau,client_state_dict):
@@ -157,7 +158,7 @@ def train(model,lr,criterion,train_data_loader,tau):
     
 
 
-def plot(global_loss,n_c):
+def plot(global_loss, global_acc,n_c):
     i=0
     print(len(global_loss),len(global_loss[0]))
     for loss_per_lr in global_loss:
@@ -166,12 +167,27 @@ def plot(global_loss,n_c):
         plt.title('Global Loss vs Comm rounds Learning Rate = {0}'.format(possible_lr[i]))  
         plt.xlabel('Number of Comm rounds')
         for algo_i, loss_per_algo in enumerate(loss_per_lr):
-            plt.plot(np.arange(len(loss_per_algo)), loss_per_algo, label = d_algo_keys[algo_i])
+            plt.plot(np.arange(len(loss_per_algo)), loss_per_algo, label = d_algo[d_algo_keys[algo_i]])
         plt.legend(loc = 'lower right')
-        plt.ylim(0,2)
-        dir_name ="n_c_"+str(n_c)+"/{0}.png".format(possible_lr[i])
-        if not os.path.exists("n_c_"+str(n_c)):
-            os.mkdir("n_c_"+str(n_c))
+        #plt.ylim(0,2)
+        dir_name ="n_c_"+str(n_c)+"/train/{0}.png".format(possible_lr[i])
+        if not os.path.exists("n_c_"+str(n_c)+"/train"):
+            os.mkdir("n_c_"+str(n_c)+"/train")
+        plt.savefig(dir_name)
+        i+=1
+    i=0
+    for acc_per_lr in global_acc:
+        plt.figure(figsize=(10,7)) 
+        plt.ylabel('Test Accuracy')
+        plt.title('Accuracy vs Comm rounds Learning Rate = {0}'.format(possible_lr[i]))  
+        plt.xlabel('Number of Comm rounds')
+        for algo_i, acc_per_algo in enumerate(acc_per_lr):
+            plt.plot(np.arange(len(acc_per_algo)), acc_per_algo, label = d_algo[d_algo_keys[algo_i]])
+        plt.legend(loc = 'lower right')
+        #plt.ylim(0,2)
+        dir_name ="n_c_"+str(n_c)+"/test/{0}.png".format(possible_lr[i])
+        if not os.path.exists("n_c_"+str(n_c)+"/test"):
+            os.mkdir("n_c_"+str(n_c)+"/test")
         plt.savefig(dir_name)
         i+=1
     #plt.close()
@@ -188,6 +204,8 @@ local_m=config.local_m
 
 
 train_data,test_data,p_i = data.init_dataset()
+dtest_loader=data.get_test_data_loader(test_data, batch_size= 128)
+print("data ",len(dtest_loader))
 stalegrads_state_dict={}
 possible_lr=config.possible_lr
 d_algo = {
@@ -206,17 +224,25 @@ d_algo_keys = sorted(list(d_algo.keys()))
 
 for choose_nc in config.no_of_c:
     loss_eachlr=[] 
+    acc_eachlr=[]
     for learning_rate in possible_lr:
         lr=learning_rate
-        loss_algo=[]  
+        loss_algo=[] 
+        acc_algo =[] 
         gamma = learning_rate
 
+        idxs_users_allrounds = [np.random.choice(client_names,choose_nc,replace = False) for i in range(config.n_rnds)]#,p=p_i/sum(p_i))
+
+
         #Run simulation for each algorithm
-        for algo in list(d_algo.keys()):      
+        for algo in list(d_algo.keys()): 
+
+            print("--------------------------Algo: {0}------------------------------------".format(d_algo[algo]))     
 
             model = network.Network() #global model holding weights wt
             criterion= torch.nn.CrossEntropyLoss()
             global_average_state_dict=model.state_dict()
+            
 
             #Dictionary that stores the models and optimizers of each client
             client_model_dict={}
@@ -243,19 +269,21 @@ for choose_nc in config.no_of_c:
                 global_average_state_dict[key] = torch.zeros(global_average_state_dict[key].size())
             
             local_rnd_loss=[]
+            local_rnd_acc=[]
 
             #Global epochs
-            for rnd in range(n_rnds): # each communication round
+            for rnd in range(config.n_rnds): # each communication round
 
                 # if(rnd==0):
                 #     idxs_users = client_names                
-                if choose_nc == 'paper':
-                    idxs_users=[]
-                    for c in client_names:
-                        if np.random.choice([True, False],p=[p_i[c],1-p_i[c]]) ==True: 
-                            idxs_users.append(c)
-                else:
-                    idxs_users = np.random.choice(client_names,choose_nc,replace = False) #,p=p_i/sum(p_i))
+                # if choose_nc == 'paper':
+                #     idxs_users=[]
+                #     for c in client_names:
+                #         if np.random.choice([True, False],p=[p_i[c],1-p_i[c]]) ==True: 
+                #             idxs_users.append(c)
+                # else:
+                #     idxs_users = np.random.choice(client_names,choose_nc,replace = False) #,p=p_i/sum(p_i))
+                idxs_users=idxs_users_allrounds[rnd]
                 print("chosen clients",idxs_users)
                 idxs_len=len(idxs_users)
 
@@ -287,32 +315,40 @@ for choose_nc in config.no_of_c:
                     
                     d_train_losses+=loss
                 d_train_losses = d_train_losses/idxs_len
-                print("Round_%d Loss:%f Algo:%d\n\n"%(rnd,d_train_losses,algo))
 
 
+                global_average_umifa = copy.deepcopy(global_average_state_dict)
                 local_rnd_loss.append(d_train_losses)
+                if algo ==1:
+                    for clients in idxs_users:                    
+                        clienti_local_state_dict=stalegrads_state_dict[clients]
+                        for key in global_average_umifa:      
+                            global_average_umifa[key] += clienti_local_state_dict[key]/choose_nc
                 
-
+                
                 denom = local_m
                 if(algo==3):
                     denom = idxs_len
                     for key in global_average_state_dict:
                         global_average_state_dict[key] = torch.zeros(global_average_state_dict[key].size())
+                    
                 
-                if algo ==1:
-                    denom = choose_nc
-                    print(choose_nc)
                 
                 # global_average_state_dict holds the average gradient of all n clients (including stale gradients), 
                 # except in saga, where it holds 1/n(sum of (current grad_i + prev_grad_i))  
+                
                 for clients in idxs_users:                    
                     clienti_local_state_dict=stalegrads_state_dict[clients]
                     for key in global_average_state_dict:      
                         global_average_state_dict[key] += (clienti_local_state_dict[key]/denom)
                 
-                s_global_av_sd = copy.deepcopy(global_average_state_dict) 
-
+                if algo == 1:
+                    s_global_av_sd = copy.deepcopy(global_average_umifa)
+                else: 
+                    s_global_av_sd = copy.deepcopy(global_average_state_dict) 
                 global_lr = lr
+               
+
 
                 #only for saga
                 if (algo==2):
@@ -325,19 +361,32 @@ for choose_nc in config.no_of_c:
                             global_state_dict[key] -= (global_lr*saga_update)/idxs_len
                         client_stalegrad_model_dict[clients].load_state_dict(clienti_local_state_dict)
 
+
                 #At this point, saga_global_av_sd has  (curr grad - prev_grad + average of all grads /n )     
                 #Only update is remaining
                 else:                   
                     for key in global_state_dict:
                         global_state_dict[key] -= (global_lr*s_global_av_sd[key]) #update weights from averaged grad
-            
+                
+                #w_value = 0
+                # for key in s_global_av_sd:
+                #     w_value+=np.linalg.norm(s_global_av_sd[key])
+
+                #print("initial grad for ",algo, w_value)
                 model.load_state_dict(global_state_dict)
+
+                acc = test(model,dtest_loader)
+                local_rnd_acc.append(acc)
                 if(rnd==100):
                     lr = lr/2
+
+                print("\nRnd {5} - Training Error: {0}, Testing Accuracy: {1}, Algo: {2}, n_c: {3}, local lr: {4} ".format(d_train_losses,acc, algo, choose_nc, learning_rate, rnd))
             loss_algo.append(local_rnd_loss)  
+            acc_algo.append(local_rnd_acc) 
         loss_eachlr.append(loss_algo)
+        acc_eachlr.append(acc_algo)
     
-    plot(loss_eachlr,choose_nc)            
+    plot(loss_eachlr, acc_eachlr, choose_nc)            
     
 
             

@@ -43,7 +43,6 @@ class FMNIST(Dataset):
       
         self.x=load_x.astype('float64')/255
         self.y=np.array(load_y)
-        print('dim %d %d'%(len(self.x),len(self.y)))  
         if set_name=='train': 
             self.client_partition={}
             self.split()
@@ -181,9 +180,9 @@ def get_train_data_loader(train_data_obj, client_i,batch_size):
     return train_dataloader
 
 
-def get_test_data_loader(test_data_obj,set_name,client_i):
+def get_test_data_loader(test_data_obj, batch_size =1):
 
-    test_data = data_utils.TensorDataset(torch.tensor(test_data_obj.X).type(torch.DoubleTensor), torch.tensor(test_data_obj.y).type(torch.LongTensor))    
-    test_dataloader = torch.utils.data.DataLoader(dataset=test_data, batch_size=len(test_data_obj.y), shuffle=False)
+    test_data = data_utils.TensorDataset(torch.tensor(test_data_obj.x).type(torch.FloatTensor), torch.tensor(test_data_obj.y).type(torch.LongTensor))    
+    test_dataloader = torch.utils.data.DataLoader(dataset=test_data, batch_size = batch_size, shuffle=False)
    
     return test_dataloader

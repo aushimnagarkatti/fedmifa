@@ -1,5 +1,5 @@
 batch_size=128 #Neural Network batch size
-n_rnds= 200 #Global rounds
+n_rnds= 300 #Global rounds
 tau=5 #Local rounds
 local_m=100 #Total no of clients
 
@@ -10,5 +10,5 @@ no_of_c=[10] #['paper',10,40,60,80]
 pi_min = 0.2
 
 #brute force search for best lr
-possible_lr= [0.02] 
+possible_lr= [0.08,0.09,0.07,0.05] 
 
