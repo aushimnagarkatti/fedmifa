@@ -186,7 +186,7 @@ def plot(global_loss, global_acc,n_c):
         plt.xlabel('Number of Comm rounds')
         for algo_i, loss_per_algo in enumerate(loss_per_lr):
             plt.plot(np.arange(len(loss_per_algo)), loss_per_algo, label = d_algo[d_algo_keys[algo_i]])
-        plt.legend(loc = 'lower right')
+        plt.legend(loc = 'upper right')
         dir_name ="n_c_"+str(n_c)+"/train/{0}.png".format(possible_lr[i])
         if not os.path.exists("n_c_"+str(n_c)+"/train"):
             cwd = os.getcwd()
