@@ -299,6 +299,7 @@ if __name__ == "__main__":
                     
                     acc = server.test(dtest_loader)
                     local_rnd_acc.append(acc)
+                    local_rnd_loss.append(d_train_losses)
                     # if(rnd==100):
                     #     lr = lr/2
 

@@ -1,5 +1,5 @@
 batch_size=128 #Neural Network batch size
-n_rnds= 300 #Global rounds
+n_rnds= 200 #Global rounds
 tau=5 #Local rounds
 total_c=100 #Total no of clients
 
