@@ -48,9 +48,10 @@ class Server():
         }
         
     def MIFA(self, ids, client_models):
+
         #sum grads from present clients
         for client in ids:
-            alllayer_grads = client_models[client].model.state_dict()
+            alllayer_grads = client_models[client].local_grad_update
             for layer in self.running_av_grads:
                 self.running_av_grads[layer] += (alllayer_grads[layer] - self.clients_alllayer_prevgrad[client][layer])/self.total_c
                 self.clients_alllayer_prevgrad[client][layer] = copy.deepcopy(alllayer_grads[layer])
@@ -63,9 +64,10 @@ class Server():
         step = copy.deepcopy(self.layers_init)
         #add grads from present clients to running avg
         for client in ids:
-            alllayer_grads = client_models[client].model.state_dict()
-            for layer in self.running_av_grads:
+            alllayer_grads = client_models[client].local_grad_update
+            for layer in alllayer_grads:
                 step[layer] += alllayer_grads[layer]/self.n_c
+            
         return step 
 
     def UMIFA(self, ids, client_models):
@@ -73,7 +75,7 @@ class Server():
         umifa_step = copy.deepcopy(self.layers_init)
         #add grads from present clients to running avg
         for client in ids:
-            alllayer_grads = client_models[client].model.state_dict()
+            alllayer_grads = client_models[client].local_grad_update
             for layer in self.running_av_grads:
                 umifa_step[layer] = self.running_av_grads[layer] + (alllayer_grads[layer] - self.clients_alllayer_prevgrad[client][layer])/self.n_c
                 self.running_av_grads[layer] += (alllayer_grads[layer] - self.clients_alllayer_prevgrad[client][layer])/self.total_c                
@@ -83,13 +85,16 @@ class Server():
     #ids are participating client IDS
     def aggregate(self, ids, client_models, algo):
         
-        
+        # print(self.global_model.state_dict())
+        print(ids)
         if algo == 0:
             step = self.MIFA(ids, client_models)
         elif algo == 1:
             step = self.UMIFA(ids, client_models)
         elif algo ==2:
             step = self.FedAvg(ids, client_models)
+        else:
+            print("Algo not valid: ", algo)
 
         global_state_dict = self.global_model.state_dict()
 
@@ -97,7 +102,6 @@ class Server():
             global_state_dict[layer] -= (self.global_lr * step[layer])
 
         self.global_model.load_state_dict(global_state_dict)           
-
 
 
     def test(self, test_data_loader):
@@ -114,7 +118,6 @@ class Server():
             out=torch.argmax(self.global_model.forward(test_X), axis = 1)
             pred.extend(out)
             actuals.extend(lab)
-        print(len(pred),len(actuals))
         accuracy = torch.count_nonzero(torch.Tensor(pred)== torch.Tensor(actuals))
         return accuracy/len(pred)
 
@@ -129,24 +132,42 @@ class Client():
         self.model = network.Network()
         self.criterion= torch.nn.CrossEntropyLoss()
         self.optimizer = optim.SGD(self.model.parameters(), lr=lr)
+        self.local_grad_update = {}
 
     
     def train(self,train_data_loader,tau):
         avg_loss=0
-        
-        train_data = iter(train_data_loader)
+        #print(self.model.state_dict())
+        # print("\n\n\n\n")
+        for i, (train_X, lab) in enumerate(train_data_loader):
         #Local epochs
-        for i in range(tau):
-            train_X, lab=next(train_data)
             self.optimizer.zero_grad() 
             out=self.model.forward(train_X.float())
             loss=self.criterion(out,lab)
+            # print(loss.data)
+            #print("before",self.model.l1.weight.grad, loss)
+
             loss.backward()
+            #print("after",self.model.l1.weight.grad)
             self.optimizer.step()
             avg_loss+=loss.data
-
+            #print(loss.data)
+            if i==tau:
+                break
+       
         return avg_loss/tau
     
+    def local_train(self,dtrain_loader,tau):
+
+        oldx = copy.deepcopy(self.model.state_dict())
+        loss = self.train(dtrain_loader,tau)
+        newx = copy.deepcopy(self.model.state_dict())
+
+        for layer in newx:
+            self.local_grad_update[layer] = (oldx[layer] - newx[layer])/self.lr
+
+        return loss
+        
     def setWeights(self, global_model_sd):
         self.model.load_state_dict(global_model_sd)
 
@@ -166,10 +187,10 @@ def plot(global_loss, global_acc,n_c):
         for algo_i, loss_per_algo in enumerate(loss_per_lr):
             plt.plot(np.arange(len(loss_per_algo)), loss_per_algo, label = d_algo[d_algo_keys[algo_i]])
         plt.legend(loc = 'lower right')
-        #plt.ylim(0,2)
         dir_name ="n_c_"+str(n_c)+"/train/{0}.png".format(possible_lr[i])
         if not os.path.exists("n_c_"+str(n_c)+"/train"):
-            os.mkdir("n_c_"+str(n_c)+"/train")
+            cwd = os.getcwd()
+            os.makedirs(cwd+"/n_c_"+str(n_c)+"/train")
         plt.savefig(dir_name)
         i+=1
     i=0
@@ -181,10 +202,10 @@ def plot(global_loss, global_acc,n_c):
         for algo_i, acc_per_algo in enumerate(acc_per_lr):
             plt.plot(np.arange(len(acc_per_algo)), acc_per_algo, label = d_algo[d_algo_keys[algo_i]])
         plt.legend(loc = 'lower right')
-        #plt.ylim(0,2)
         dir_name ="n_c_"+str(n_c)+"/test/{0}.png".format(possible_lr[i])
         if not os.path.exists("n_c_"+str(n_c)+"/test"):
-            os.mkdir("n_c_"+str(n_c)+"/test")
+            cwd = os.getcwd()
+            os.makedirs(cwd+"/n_c_"+str(n_c)+"/test")
         plt.savefig(dir_name)
         i+=1
     #plt.close()
@@ -204,7 +225,7 @@ if __name__ == "__main__":
     
     #Init data
     train_data,test_data,p_i = data.init_dataset()
-    dtest_loader=data.get_test_data_loader(test_data, batch_size= 128)
+    dtest_loader=data.get_test_data_loader(test_data, batch_size= batch_size)
     d_algo = {
         0: "MIFA",
         1: "UMIFA",
@@ -256,18 +277,17 @@ if __name__ == "__main__":
                     global_state_dict=server.global_model.state_dict()
                 
                     #Assign each client model to global model
-                    for c in idxs_users:            
+                    for c in idxs_users:  
                         client_object_dict[c].setWeights(global_state_dict)
 
-                    d_train_losses=0 #loss over all clients
 
-                    #iterate through selected clients
+                    d_train_losses=0 #loss over all clients
                     for sel_idx in idxs_users:
                         
                         #Get train loader
                         dtrain_loader=data.get_train_data_loader(train_data, sel_idx,batch_size)
-
-                        loss = client_object_dict[sel_idx].train(dtrain_loader,tau)
+                        loss = client_object_dict[sel_idx].local_train(dtrain_loader, tau)
+                        # print(loss)
 
 
                         d_train_losses+=loss
@@ -279,8 +299,8 @@ if __name__ == "__main__":
                     
                     acc = server.test(dtest_loader)
                     local_rnd_acc.append(acc)
-                    if(rnd==100):
-                        lr = lr/2
+                    # if(rnd==100):
+                    #     lr = lr/2
 
                     print("\nRnd {5} - Training Error: {0}, Testing Accuracy: {1}, Algo: {2}, n_c: {3}, local lr: {4} ".format(d_train_losses,acc, algo, choose_nc, learning_rate, rnd))
                 loss_algo.append(local_rnd_loss)  

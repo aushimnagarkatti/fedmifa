@@ -174,7 +174,7 @@ def init_dataset():
 
 def get_train_data_loader(train_data_obj, client_i,batch_size):
     train_data = data_utils.TensorDataset(torch.tensor(train_data_obj.dataset[client_i]['x']).type(torch.DoubleTensor), torch.tensor(train_data_obj.dataset[client_i]['y']).type(torch.LongTensor))  
-    train_dataloader = torch.utils.data.DataLoader(dataset=train_data, batch_size=10, shuffle=False)
+    train_dataloader = torch.utils.data.DataLoader(dataset=train_data, batch_size=batch_size, shuffle=True)
    
    
     return train_dataloader
