@@ -9,16 +9,18 @@ from matplotlib.colors import LinearSegmentedColormap
 from numpy.random.mtrand import standard_cauchy
 import torch
 import network
-import data
+#import data
 import torch.nn as nn
 import numpy as np
 import matplotlib.pyplot as plt
 import json
+import torchvision
 import torch.utils.data as data_utils
 import torch.optim as optim
 import copy
 import config
 import os
+import data_cifar10 as data
 
 class Server():
 
@@ -46,6 +48,39 @@ class Server():
             1: "UMIFA",
             2: "FedAvg"
         }
+
+    def MIFA_add(self, ids, client_models):
+
+        absent = []
+        for c in list(range(self.total_c)):
+            if c not in ids:
+                absent.append(c)
+        step = copy.deepcopy(self.layers_init)
+        #sum grads from absent clients
+        for client in absent:
+            grads = copy.deepcopy(self.clients_alllayer_prevgrad[client])
+            for layer in step:
+                step[layer] += grads[layer]/self.total_c
+                #print(layer, np.linalg.norm(self.clients_alllayer_prevgrad[client][layer]))
+
+        
+
+        #sum grads from present clients
+        for client in ids:
+            grads = copy.deepcopy(client_models[client].local_grad_update)
+            for layer in step:
+                step[layer] += grads[layer]/self.total_c
+                self.clients_alllayer_prevgrad[client][layer] = copy.deepcopy(grads[layer])
+                #print(client, layer, np.linalg.norm(grads[layer]))
+                
+        # norm = 0
+        # for k,layer in step.items():
+        #     print("\n\nk  ",k,layer)
+        #     norm += np.linalg.norm(grads[k])
+         
+
+        return step
+
         
     def MIFA(self, ids, client_models):
 
@@ -55,13 +90,14 @@ class Server():
             for layer in self.running_av_grads:
                 self.running_av_grads[layer] += (alllayer_grads[layer] - self.clients_alllayer_prevgrad[client][layer])/self.total_c
                 self.clients_alllayer_prevgrad[client][layer] = copy.deepcopy(alllayer_grads[layer])
-        
+
         return self.running_av_grads
 
 
     def FedAvg(self, ids, client_models):
         
         step = copy.deepcopy(self.layers_init)
+
         #add grads from present clients to running avg
         for client in ids:
             alllayer_grads = client_models[client].local_grad_update
@@ -86,13 +122,13 @@ class Server():
     def aggregate(self, ids, client_models, algo):
         
         # print(self.global_model.state_dict())
-        print(ids)
         if algo == 0:
             step = self.MIFA(ids, client_models)
         elif algo == 1:
             step = self.UMIFA(ids, client_models)
         elif algo ==2:
             step = self.FedAvg(ids, client_models)
+        
         else:
             print("Algo not valid: ", algo)
 
@@ -144,14 +180,10 @@ class Client():
             self.optimizer.zero_grad() 
             out=self.model.forward(train_X.float())
             loss=self.criterion(out,lab)
-            # print(loss.data)
-            #print("before",self.model.l1.weight.grad, loss)
 
             loss.backward()
-            #print("after",self.model.l1.weight.grad)
             self.optimizer.step()
             avg_loss+=loss.data
-            #print(loss.data)
             if i==tau:
                 break
        
@@ -163,8 +195,14 @@ class Client():
         loss = self.train(dtrain_loader,tau)
         newx = copy.deepcopy(self.model.state_dict())
 
-        for layer in newx:
+        #print("loss",loss)
+        for layer, val in newx.items():
             self.local_grad_update[layer] = (oldx[layer] - newx[layer])/self.lr
+            
+        
+
+
+        
 
         return loss
         
@@ -210,6 +248,11 @@ def plot(global_loss, global_acc,n_c):
         i+=1
     #plt.close()
 
+def imshow(img):
+    img = img / 2 + 0.5     # unnormalize
+    plt.imshow(np.transpose(img, (1, 2, 0)))
+    plt.show()
+
 
 if __name__ == "__main__":
 
@@ -225,6 +268,23 @@ if __name__ == "__main__":
     
     #Init data
     train_data,test_data,p_i = data.init_dataset()
+
+    # for c in range(0,100,20):
+    #     print(c)
+    #     dtrain_loader=data.get_train_data_loader(train_data, c,batch_size=500)
+    #     for images, l in dtrain_loader:
+    #         im = np.transpose(images.numpy(),(0,3,1,2))
+    #         #plt.figure(figsize=(25,20))
+    #         plt.axis('off')
+    #         grid = torchvision.utils.make_grid(torch.tensor(im), nrow=25)
+    #         imshow(grid)
+          
+    #         #plt.savefig('client_dataimages/'+str(c)+'.png')
+    #         #plt.imsave('client_dataimages/'+str(c)+'.png',torchvision.utils.make_grid(images, nrow=20).permute((1,2,0)))
+            
+    #         break
+    # exit(0)
+        
     dtest_loader=data.get_test_data_loader(test_data, batch_size= batch_size)
     d_algo = {
         0: "MIFA",

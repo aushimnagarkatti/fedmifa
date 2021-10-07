@@ -168,7 +168,7 @@ def init_dataset():
     train_data_obj=MNIST('train')
     test_data_obj=MNIST('test')
     p_i = train_data_obj.selection_prob()
-
+    
     return train_data_obj,test_data_obj, p_i
 
 
