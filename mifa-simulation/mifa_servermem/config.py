@@ -12,7 +12,7 @@ no_of_c=[10] #['paper',10,40,60,80]
 pi_min = 0.2
 
 #brute force search for best lr
-possible_lr= [0.001]#,0.07,0.05] 
+possible_lr= [0.1]#,0.07,0.05] 
 
 
 

@@ -171,7 +171,35 @@ class Server():
         return accuracy/len(pred)
 
 
-
+def schedule(self, mode = 'local'):
+    #schedule
+        if rnd == 100:
+            fact = 10
+            if mode =='global':
+                print(self.global_lr, server.global_lr/fact)
+                server.global_lr /=fact
+            else:
+                for g in self.optimizer.param_groups:
+                    g['lr'] = g['lr']/fact
+                    print("g",self.id,g['lr'])
+        elif rnd == 200:
+            fact = 10
+            if mode =='global':
+                self.global_lr /=fact
+            else:
+                for g in self.optimizer.param_groups:
+                    g['lr'] = g['lr']/fact
+        elif rnd == 300:
+            fact=10
+            if mode =='global':
+                self.global_lr /=fact
+            else:
+                for g in self.optimizer.param_groups:
+                    g['lr'] = g['lr']/fact
+        # elif rnd == 350:
+        #     server.global_lr /=2
+        #     for g in self.optimizer.param_groups:
+        #         g['lr'] = g['lr']/2
 
 class Client():
 
@@ -218,23 +246,7 @@ class Client():
         for layer, val in newx.items():
             self.local_grad_update[layer] = (oldx[layer] - newx[layer])/self.lr
 
-        #schedule
-        if rnd == 70:
-            server.global_lr /=5
-            for g in self.optimizer.param_groups:
-                g['lr'] = g['lr']/5
-        elif rnd == 150:
-            server.global_lr /=5
-            for g in self.optimizer.param_groups:
-                g['lr'] = g['lr']/5
-        elif rnd == 200:
-            server.global_lr /=5
-            for g in self.optimizer.param_groups:
-                g['lr'] = g['lr']/5
-        elif rnd == 350:
-            server.global_lr /=2
-            for g in self.optimizer.param_groups:
-                g['lr'] = g['lr']/2
+        schedule(self)
 
         return loss
         
@@ -359,6 +371,7 @@ if __name__ == "__main__":
 
                 #Global epochs
                 for rnd in tqdm(range(config.n_rnds), total = config.n_rnds): # each communication round
+                    schedule(server, mode = 'global')
                     idxs_users=idxs_users_allrounds[rnd]
                     # print("chosen clients",idxs_users)
                     idxs_len=len(idxs_users)
@@ -394,7 +407,7 @@ if __name__ == "__main__":
                     #     lr = lr/2
 
 
-                    print("Rnd {5} - Training Error: {0}, Testing Accuracy: {1}, Algo: {2}, n_c: {3}, local lr: {4} \n".format(d_train_losses,acc, algo, choose_nc, learning_rate, rnd))
+                    print("Rnd {5} - Training Error: {0}, Testing Accuracy: {1}, Algo: {2}, n_c: {3}, local lr: {4} \n".format(d_train_losses,acc, algo, choose_nc, server.global_lr, rnd))
                 loss_algo.append(local_rnd_loss)  
                 acc_algo.append(local_rnd_acc) 
             loss_eachlr.append(loss_algo)
