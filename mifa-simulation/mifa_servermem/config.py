@@ -1,5 +1,7 @@
+import lenet
+
 batch_size=128 #Neural Network batch size
-n_rnds=200 #Global rounds
+n_rnds=500 #Global rounds
 tau=5 #Local rounds
 total_c=100 #Total no of clients
 
@@ -10,4 +12,7 @@ no_of_c=[10] #['paper',10,40,60,80]
 pi_min = 0.2
 
 #brute force search for best lr
-possible_lr= [0.08]#,0.07,0.05] 
+possible_lr= [0.001]#,0.07,0.05] 
+
+
+

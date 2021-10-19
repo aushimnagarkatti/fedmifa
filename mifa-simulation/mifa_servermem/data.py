@@ -173,7 +173,15 @@ def init_dataset():
 
 
 def get_train_data_loader(train_data_obj, client_i,batch_size):
-    train_data = data_utils.TensorDataset(torch.tensor(train_data_obj.dataset[client_i]['x']).type(torch.DoubleTensor), torch.tensor(train_data_obj.dataset[client_i]['y']).type(torch.LongTensor))  
+    train_data = data_utils.TensorDataset(torch.tensor(train_data_obj.dataset[client_i]['x']).type(torch.DoubleTensor), torch.tensor(train_data_obj.dataset[client_i]['y']).type(torch.LongTensor),
+                        transform=transforms.Compose([
+                                                      transforms.ToTensor(),
+                                                      transforms.RandomHorizontalFlip(0.2)
+                                                      transforms.ColorJitter(brightness=0.04, contrast=0.04, saturation=0.04, hue=0.04),
+                                                      transforms.RandomAffine(degrees=40, scale=(.9, 1.1), shear=0),
+                                                      transforms.RandomRotation(30, resample=False,expand=False, center=None),
+                                                      transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+                                                      ]))  
     train_dataloader = torch.utils.data.DataLoader(dataset=train_data, batch_size=batch_size, shuffle=True)
    
    
@@ -182,7 +190,11 @@ def get_train_data_loader(train_data_obj, client_i,batch_size):
 
 def get_test_data_loader(test_data_obj, batch_size =1):
 
-    test_data = data_utils.TensorDataset(torch.tensor(test_data_obj.x).type(torch.FloatTensor), torch.tensor(test_data_obj.y).type(torch.LongTensor))    
+    test_data = data_utils.TensorDataset(torch.tensor(test_data_obj.x).type(torch.FloatTensor), torch.tensor(test_data_obj.y).type(torch.LongTensor),
+                        transform=transforms.Compose([
+                                                      transforms.ToTensor(),
+                                                      transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+                                                      ]))    
     test_dataloader = torch.utils.data.DataLoader(dataset=test_data, batch_size = batch_size, shuffle=False)
    
     return test_dataloader
