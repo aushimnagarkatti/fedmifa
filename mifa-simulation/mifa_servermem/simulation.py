@@ -171,31 +171,34 @@ class Server():
         return accuracy/len(pred)
 
 
-def schedule(self, mode = 'local'):
+def schedule(server= None, mode = 'local'):
     #schedule
-        if rnd == 100:
-            fact = 10
+        if rnd == 120:
+            fact = 2
             if mode =='global':
-                print(self.global_lr, server.global_lr/fact)
                 server.global_lr /=fact
             else:
-                for g in self.optimizer.param_groups:
-                    g['lr'] = g['lr']/fact
-                    print("g",self.id,g['lr'])
-        elif rnd == 200:
+                for c in client_object_dict:
+                    for g in client_object_dict[c].optimizer.param_groups:
+                        g['lr'] = g['lr']/fact
+
+        elif rnd == 250:
             fact = 10
             if mode =='global':
-                self.global_lr /=fact
+                server.global_lr /=fact
             else:
-                for g in self.optimizer.param_groups:
-                    g['lr'] = g['lr']/fact
-        elif rnd == 300:
+                for c in client_object_dict:
+                    for g in client_object_dict[c].optimizer.param_groups:
+                        g['lr'] = g['lr']/fact
+
+        elif rnd == 400:
             fact=10
             if mode =='global':
-                self.global_lr /=fact
+                server.global_lr /=fact
             else:
-                for g in self.optimizer.param_groups:
-                    g['lr'] = g['lr']/fact
+                for c in client_object_dict:
+                    for g in client_object_dict[c].optimizer.param_groups:
+                        g['lr'] = g['lr']/fact
         # elif rnd == 350:
         #     server.global_lr /=2
         #     for g in self.optimizer.param_groups:
@@ -246,7 +249,6 @@ class Client():
         for layer, val in newx.items():
             self.local_grad_update[layer] = (oldx[layer] - newx[layer])/self.lr
 
-        schedule(self)
 
         return loss
         
@@ -371,7 +373,9 @@ if __name__ == "__main__":
 
                 #Global epochs
                 for rnd in tqdm(range(config.n_rnds), total = config.n_rnds): # each communication round
-                    schedule(server, mode = 'global')
+                    # schedule(server, mode = 'global')
+                    # schedule()
+
                     idxs_users=idxs_users_allrounds[rnd]
                     # print("chosen clients",idxs_users)
                     idxs_len=len(idxs_users)
