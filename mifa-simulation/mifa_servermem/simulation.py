@@ -421,58 +421,51 @@ class Client():
         self.model.load_state_dict(global_model_sd)
 
 
-def plot(loss, global_acc,global_loss,n_c, timestr):
-    i=0
-
+def plot(loss_algo, acc_algo, test_loss_algo,n_c, timestr, algo_lr, learning_rate):
     #plot train loss (local)
-    for loss_per_lr in loss:
-        plt.figure(figsize=(10,7)) 
-        plt.ylabel('Loss')
-        plt.xlabel('Number of Comm rounds')
-        for algo_i, loss_per_algo in enumerate(loss_per_lr):
-            plt.title('Accuracy vs Comm rounds Learning Rate = {0}'.format(config.algo_lr[algo_i]))  
-            plt.plot(np.arange(len(loss_per_algo))*config.plot_every_n, loss_per_algo, label = d_algo[d_algo_keys[algo_i]])
-        plt.legend(loc = 'upper right')
-        dir_name ="./n_c_"+str(n_c)+"/train/{0}.png".format(timestr)
-        if not os.path.exists("./n_c_"+str(n_c)+"/train"):
-            #cwd = os.getcwd()
-            os.makedirs("./n_c_"+str(n_c)+"/train")
-        plt.savefig(dir_name)
-        i+=1
-    i=0
+    plt.figure(figsize=(10,7)) 
+    plt.ylabel('Loss')
+    plt.xlabel('Number of Comm rounds')
+    for algo_i, loss_per_algo in enumerate(loss_algo):
+        plt.title('Accuracy vs Comm rounds lr = {0:.2f}, clients = {1}/{2}, lr_decay = {3} '.format(
+            algo_lr[algo_i][learning_rate],n_c, config.total_c, config.lrfactor[algo_i]))  
+        plt.plot(np.arange(len(loss_per_algo))*config.plot_every_n, loss_per_algo, label = d_algo[d_algo_keys[algo_i]])
+    plt.legend(loc = 'upper right')
+    dir_name ="./n_c_"+str(n_c)+"/train/{0}.png".format(timestr)
+    if not os.path.exists("./n_c_"+str(n_c)+"/train"):
+        #cwd = os.getcwd()
+        os.makedirs("./n_c_"+str(n_c)+"/train")
+    plt.savefig(dir_name)
 
     #plot accuracy test 
-    for acc_per_lr in global_acc:
-        plt.figure(figsize=(10,7)) 
-        plt.ylabel('Test Accuracy')
-        plt.xlabel('Number of Comm rounds')
-        for algo_i, acc_per_algo in enumerate(acc_per_lr):
-            plt.title('Accuracy vs Comm rounds Learning Rate = {0}'.format(config.algo_lr[algo_i]))  
-            plt.plot(np.arange(len(acc_per_algo))*config.plot_every_n, acc_per_algo, label = d_algo[d_algo_keys[algo_i]])
-        plt.legend(loc = 'lower right')
-        dir_name ="./n_c_"+str(n_c)+"/test/{0}.png".format(timestr)
-        if not os.path.exists("./n_c_"+str(n_c)+"/test"):
-            #cwd = os.getcwd()
-            os.makedirs("./n_c_"+str(n_c)+"/test")
-        plt.savefig(dir_name)
-        i+=1
-    i=0
+    plt.figure(figsize=(10,7)) 
+    plt.ylabel('Test Accuracy')
+    plt.xlabel('Number of Comm rounds')
+    for algo_i, acc_per_algo in enumerate(acc_algo):
+        plt.title('Accuracy vs Comm rounds lr = {0:.2f}, clients = {1}/{2}, lr_decay = {3} '.format(
+            algo_lr[algo_i][learning_rate],n_c, config.total_c, config.lrfactor[algo_i])) 
+        plt.plot(np.arange(len(acc_per_algo))*config.plot_every_n, acc_per_algo, label = d_algo[d_algo_keys[algo_i]])
+    plt.legend(loc = 'lower right')
+    dir_name ="./n_c_"+str(n_c)+"/test/{0}.png".format(timestr)
+    if not os.path.exists("./n_c_"+str(n_c)+"/test"):
+        #cwd = os.getcwd()
+        os.makedirs("./n_c_"+str(n_c)+"/test")
+    plt.savefig(dir_name)
 
     #plot loss test 
-    for tstloss_per_lr in global_loss:
-        plt.figure(figsize=(10,7)) 
-        plt.ylabel('Test Loss')
-        plt.xlabel('Number of Comm rounds')
-        for algo_i, tstloss_per_algo in enumerate(tstloss_per_lr):
-            plt.title('Global Loss vs Comm rounds Learning Rate = {0}'.format(config.algo_lr[algo_i]))  
-            plt.plot(np.arange(len(tstloss_per_algo))*config.plot_every_n, tstloss_per_algo, label = d_algo[d_algo_keys[algo_i]])
-        plt.legend(loc = 'lower right')
-        dir_name ="./n_c_"+str(n_c)+"/test_loss/{0}.png".format(timestr)
-        if not os.path.exists("./n_c_"+str(n_c)+"/test_loss"):
-            #cwd = os.getcwd()
-            os.makedirs("./n_c_"+str(n_c)+"/test_loss")
-        plt.savefig(dir_name)
-        i+=1
+    plt.figure(figsize=(10,7)) 
+    plt.ylabel('Test Loss')
+    plt.xlabel('Number of Comm rounds')
+    for algo_i, tstloss_per_algo in enumerate(test_loss_algo):
+        plt.title('Accuracy vs Comm rounds lr = {0:.2f}, clients = {1}/{2}, lr_decay = {3} '.format(
+            algo_lr[algo_i][learning_rate],n_c, config.total_c, config.lrfactor[algo_i]))   
+        plt.plot(np.arange(len(tstloss_per_algo))*config.plot_every_n, tstloss_per_algo, label = d_algo[d_algo_keys[algo_i]])
+    plt.legend(loc = 'lower right')
+    dir_name ="./n_c_"+str(n_c)+"/test_loss/{0}.png".format(timestr)
+    if not os.path.exists("./n_c_"+str(n_c)+"/test_loss"):
+        #cwd = os.getcwd()
+        os.makedirs("./n_c_"+str(n_c)+"/test_loss")
+    plt.savefig(dir_name)
     #plt.close()
 
 class DatasetSplit(Dataset):
@@ -499,7 +492,6 @@ if __name__ == "__main__":
     n_rnds=config.n_rnds
     tau=config.tau
     total_c=config.total_c
-    possible_lr=config.possible_lr
     #global_lr = config.global_lr
 
     
@@ -552,7 +544,6 @@ if __name__ == "__main__":
     # 1 corresponds to umifa
     # 2 corresponds to fedavg
     cmodel = network.resnet18() #lenet.LeNet()
-    timestr = time.strftime("%Y%m%d-%H%M%S")
 
     for choose_nc in config.no_of_c:
 
@@ -560,10 +551,8 @@ if __name__ == "__main__":
         acc_eachlr=[]
         test_loss_eachlr=[]
 
-        for learning_rate in possible_lr:
-
-            global_lr = learning_rate
-            lr=learning_rate
+        for learning_rate in range(len(config.algo_lr[0])):
+            timestr = time.strftime("%Y%m%d-%H%M%S")            
             loss_algo=[] 
             acc_algo =[] 
             test_loss_algo =[]
@@ -573,7 +562,7 @@ if __name__ == "__main__":
             #Run simulation for each algorithm
             for algo in list(d_algo.keys()): 
 
-                global_lr = lr = config.algo_lr[algo]
+                global_lr = lr = config.algo_lr[algo][learning_rate]
                 
                 print("--------------------------Algo: {0}------------------------------------".format(d_algo[algo]))     
 
@@ -591,7 +580,7 @@ if __name__ == "__main__":
                 for rnd in tqdm(range(config.n_rnds), total = config.n_rnds): # each communication round
                     #schedule(server, mode = 'global')
                     #schedule()
-                    lr = round_schedule(lr, rnd, lrfactor)
+                    lr = round_schedule(lr, rnd, lrfactor[algo])
 
                     idxs_users=idxs_users_allrounds[rnd]
                     # print("chosen clients",idxs_users)
@@ -642,7 +631,7 @@ if __name__ == "__main__":
             acc_eachlr.append(acc_algo)
             test_loss_eachlr.append(test_loss_algo)
         
-        plot(loss_eachlr, acc_eachlr, test_loss_eachlr,choose_nc, timestr)            
+            plot(loss_algo, acc_algo, test_loss_algo,choose_nc, timestr, config.algo_lr, learning_rate)            
         
 
                 
