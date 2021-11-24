@@ -118,9 +118,15 @@ elif args['dataset'] == 'fmnist':
         dict_users = noniid_partition(dataset_train, args['num_users'])
 
 elif args['dataset'] == 'cifar':
-    trans_cifar = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-    dataset_train = datasets.CIFAR10('./data/cifar', train=True, download=True, transform=trans_cifar)
-    dataset_test = datasets.CIFAR10('./data/cifar', train=False, download=True, transform=trans_cifar)
+    trans_cifar_train = transforms.Compose([transforms.ToTensor(), \
+        transforms.RandomCrop(24),
+        transforms.RandomHorizontalFlip(0.25),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+    trans_cifar_test = transforms.Compose([transforms.ToTensor(), \
+        transforms.CenterCrop(24),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+    dataset_train = datasets.CIFAR10('./data/cifar', train=True, download=True, transform=trans_cifar_train)
+    dataset_test = datasets.CIFAR10('./data/cifar', train=False, download=True, transform=trans_cifar_test)
     if args['iid']:
         dict_users = iid_partition(dataset_train, args['num_users'])
     else:
@@ -611,7 +617,7 @@ eta[s2] = 0.1
 eta[s3] = 0.1
 
 
-compression_methods = [s1,s2,s0]
+compression_methods = [s0]
 
 #args['epochs'] = 500
 
@@ -619,7 +625,7 @@ compression_methods = [s1,s2,s0]
 
 # net_glob_org = MLP_CIFAR(32*32*3,10).to(args['device'])
 # net_glob_org = MLP(28*28,10).to(args['device'])
-net_glob_org = LeNet().to(args['device'])
+net_glob_org = network.resnet18().to(args['device']) #LeNet().to(args['device'])
 #net_glob_org = network.resnet18().to(args['device'])
 
 

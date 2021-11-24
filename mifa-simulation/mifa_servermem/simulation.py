@@ -26,6 +26,7 @@ import torch.optim as optim
 import copy
 import config
 import os
+import gc
 import data_cifar10 as data
 from tqdm import tqdm
 
@@ -57,16 +58,16 @@ def noniid_partition(dataset, num_users):
 
 class Server():
 
-    def __init__(self, n_c, total_clients, global_lr, cluster =0):
+    def __init__(self, n_c, total_clients, global_lr, model, cluster =0):
         
         self.n_c = n_c
         self.global_lr = global_lr
         self.total_c = total_clients
-        self.global_model = lenet.LeNet()
+        self.global_model = model#lenet.LeNet()
         self.clients_alllayer_prevgrad = {}
         self.layers_init = self.global_model.state_dict()
         self.cluster = cluster #1 to implement clustering
-        
+        self.criterion = torch.nn.CrossEntropyLoss()
 
         #initialize each layer's gradient to 0 for a client
         for layer in self.layers_init:
@@ -181,6 +182,9 @@ class Server():
                 for layer in self.running_av_grads:
                     layer_grad = alllayer_grads[layer].cpu()
                     prevgrad = self.clients_alllayer_prevgrad[client][layer].cpu() 
+                    # print("running av",self.running_av_grads[layer].shape)
+                    # print("gm",self.global_model.state_dict()[layer].shape)
+                    # print("layer-prev",(layer_grad - prevgrad).shape)
                     self.running_av_grads[layer] += (layer_grad - prevgrad)/self.total_c
 
                     #self.running_av_grads[layer] += (layer_grad - self.clients_alllayer_prevgrad[client][layer])/self.total_c
@@ -283,41 +287,27 @@ class Server():
         actuals = []
         l=len(test_data_loader)
         test_model = copy.deepcopy(self.global_model).cuda()
-
+        loss =0
         test_model.eval()
         #Over entire test set
-        for i in range(l):
-            self.global_model.eval()
-            test_X, lab=next(iter(test_data_loader))
-            test_X = test_X.cuda()
-            #forward
-            out=torch.argmax(test_model.forward(test_X), axis = 1)
+        with torch.no_grad():
+            for i in range(l):
+                test_X, lab=next(iter(test_data_loader))
+                test_X = test_X.cuda()
+                #forward
+                out = test_model.forward(test_X)
+                
+                batch_loss = self.criterion(out,lab.cuda())
 
-            pred.extend(out)
-            actuals.extend(lab)
+                out=torch.argmax(out, axis = 1)
+                loss += float(batch_loss.data)
+                pred.extend(out)
+                actuals.extend(lab)
+        loss = loss/l
         accuracy = torch.count_nonzero(torch.Tensor(pred)== torch.Tensor(actuals))
-        return accuracy/len(pred)
+        return accuracy/len(pred), loss
     
-    def allclients_loss(self, client_id):
     
-        pred =[]
-        actuals = []
-        l=len(test_data_loader)
-        test_model = copy.deepcopy(self.global_model).cuda()
-
-        test_model.eval()
-        #Over entire test set
-        for i in range(l):
-            self.global_model.eval()
-            test_X, lab=next(iter(test_data_loader))
-            test_X = test_X.cuda()
-            #forward
-            out=torch.argmax(test_model.forward(test_X), axis = 1)
-            
-            pred.extend(out)
-            actuals.extend(lab)
-        accuracy = torch.count_nonzero(torch.Tensor(pred)== torch.Tensor(actuals))
-        return accuracy/len(pred)
     
 def plot_clusters(client_obj_dict, n_c, algo, timestr):
     final_clusters = np.zeros(config.K)
@@ -337,6 +327,11 @@ def plot_clusters(client_obj_dict, n_c, algo, timestr):
     plt.close()
 
 
+def round_schedule(lr, rnd, lrfactor):
+    if rnd%200==0:
+        return lr*lrfactor
+    else:
+         return lr
 
 def schedule(server= None, mode = 'local'):
     #schedule
@@ -348,7 +343,7 @@ def schedule(server= None, mode = 'local'):
         #         for c in client_object_dict:
         #             for g in client_object_dict[c].optimizer.param_groups:
         #                 g['lr'] = g['lr']/fact
-
+        
         if rnd == 700:
             fact = 5
             if mode =='global':
@@ -373,47 +368,49 @@ def schedule(server= None, mode = 'local'):
 
 class Client():
 
-    def __init__(self, id, lr, model):
+    def __init__(self, id, lr):
         self.id = id
         self.lr = lr
-        model = model 
+        #model = model 
         #lenet.LeNet()
-        self.model = model.cuda()
-        weightDecay = 5e-5
+        # self.model = model
+        self.weightDecay = 5e-5
         self.criterion= torch.nn.CrossEntropyLoss()
-        self.optimizer = optim.SGD(self.model.parameters(), lr=lr, weight_decay=weightDecay, momentum = 0.2)
         self.cluster_center = -1
         self.local_grad_update = {}
 
     
-    def train(self,train_data_loader,tau):
+    def train(self,train_data_loader,tau,model, lr=0.1):
         avg_loss=0
         #print(self.model.state_dict())
         # print("\n\n\n\n")
-        self.model.train()
+        model = model.cuda()
+        optimizer = optim.SGD(model.parameters(), lr=lr, weight_decay=self.weightDecay)
+        model.train()
         for i, (train_X, lab) in enumerate(train_data_loader):
             #train_X.view(train_X.shape[0],3,32,32).cuda()
             #train_X = train_X.transpose(1,3).cuda() 
             train_X = train_X.cuda()
             lab = lab.cuda()
-            self.optimizer.zero_grad() 
-            out=self.model.forward(train_X.float())
+            optimizer.zero_grad() 
+            out=model.forward(train_X.float())
             loss=self.criterion(out,lab)
             loss.backward()
-            self.optimizer.step()
-            avg_loss+=loss.data
-             
-        loss = avg_loss/len(train_data_loader)     
-        return loss
+            optimizer.step()
+            avg_loss+=float(loss.data)
+            
+        loss = avg_loss/len(train_data_loader)    
+        return loss, model
     
-    def local_train(self,dtrain_loader,tau, rnd, server):
+    def local_train(self,dtrain_loader,lr, model):
 
-        oldx = copy.deepcopy(self.model.state_dict())
+        oldx = model.state_dict()
         loss =0
         #train each client for local epochs
         for epoch in range(config.local_epochs):
-            loss += self.train(dtrain_loader,tau)
-        newx = copy.deepcopy(self.model.state_dict())
+            loss_epoch, model_trained = self.train(dtrain_loader,tau, lr = lr, model = model)
+            loss+=loss_epoch
+        newx = model_trained.cpu().state_dict()
         #print("loss",loss)
         for layer, val in newx.items():
             self.local_grad_update[layer] = (newx[layer]-oldx[layer])
@@ -424,14 +421,16 @@ class Client():
         self.model.load_state_dict(global_model_sd)
 
 
-def plot(global_loss, global_acc,n_c, timestr):
+def plot(loss, global_acc,global_loss,n_c, timestr):
     i=0
-    for loss_per_lr in global_loss:
+
+    #plot train loss (local)
+    for loss_per_lr in loss:
         plt.figure(figsize=(10,7)) 
         plt.ylabel('Loss')
-        plt.title('Global Loss vs Comm rounds Learning Rate = {0}'.format(possible_lr[i]))  
         plt.xlabel('Number of Comm rounds')
         for algo_i, loss_per_algo in enumerate(loss_per_lr):
+            plt.title('Accuracy vs Comm rounds Learning Rate = {0}'.format(config.algo_lr[algo_i]))  
             plt.plot(np.arange(len(loss_per_algo))*config.plot_every_n, loss_per_algo, label = d_algo[d_algo_keys[algo_i]])
         plt.legend(loc = 'upper right')
         dir_name ="./n_c_"+str(n_c)+"/train/{0}.png".format(timestr)
@@ -441,18 +440,37 @@ def plot(global_loss, global_acc,n_c, timestr):
         plt.savefig(dir_name)
         i+=1
     i=0
+
+    #plot accuracy test 
     for acc_per_lr in global_acc:
         plt.figure(figsize=(10,7)) 
         plt.ylabel('Test Accuracy')
-        plt.title('Accuracy vs Comm rounds Learning Rate = {0}'.format(possible_lr[i]))  
         plt.xlabel('Number of Comm rounds')
         for algo_i, acc_per_algo in enumerate(acc_per_lr):
+            plt.title('Accuracy vs Comm rounds Learning Rate = {0}'.format(config.algo_lr[algo_i]))  
             plt.plot(np.arange(len(acc_per_algo))*config.plot_every_n, acc_per_algo, label = d_algo[d_algo_keys[algo_i]])
         plt.legend(loc = 'lower right')
         dir_name ="./n_c_"+str(n_c)+"/test/{0}.png".format(timestr)
         if not os.path.exists("./n_c_"+str(n_c)+"/test"):
             #cwd = os.getcwd()
             os.makedirs("./n_c_"+str(n_c)+"/test")
+        plt.savefig(dir_name)
+        i+=1
+    i=0
+
+    #plot loss test 
+    for tstloss_per_lr in global_loss:
+        plt.figure(figsize=(10,7)) 
+        plt.ylabel('Test Loss')
+        plt.xlabel('Number of Comm rounds')
+        for algo_i, tstloss_per_algo in enumerate(tstloss_per_lr):
+            plt.title('Global Loss vs Comm rounds Learning Rate = {0}'.format(config.algo_lr[algo_i]))  
+            plt.plot(np.arange(len(tstloss_per_algo))*config.plot_every_n, tstloss_per_algo, label = d_algo[d_algo_keys[algo_i]])
+        plt.legend(loc = 'lower right')
+        dir_name ="./n_c_"+str(n_c)+"/test_loss/{0}.png".format(timestr)
+        if not os.path.exists("./n_c_"+str(n_c)+"/test_loss"):
+            #cwd = os.getcwd()
+            os.makedirs("./n_c_"+str(n_c)+"/test_loss")
         plt.savefig(dir_name)
         i+=1
     #plt.close()
@@ -510,12 +528,20 @@ if __name__ == "__main__":
         
     # dtest_loader=data.get_test_data_loader(test_data, batch_size= batch_size)
 
-    trans_cifar = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-    dataset_train = datasets.CIFAR10('./data/cifar', train=True, download=True, transform=trans_cifar)
-    dataset_test = datasets.CIFAR10('./data/cifar', train=False, download=True, transform=trans_cifar)
+    trans_cifar_train = transforms.Compose([transforms.ToTensor(), \
+        #transforms.RandomCrop(24),
+        transforms.RandomHorizontalFlip(0.25),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+    trans_cifar_test = transforms.Compose([transforms.ToTensor(), \
+        #transforms.CenterCrop(24),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+    
+    dataset_train = datasets.CIFAR10('./data/cifar', train=True, download=True, transform=trans_cifar_train)
+    dataset_test = datasets.CIFAR10('./data/cifar', train=False, download=True, transform=trans_cifar_test)
     dict_users = noniid_partition(dataset_train, config.total_c)
     d_algo = config.d_algo
     d_algo_keys = sorted(list(d_algo.keys()))
+    lrfactor = config.lrfactor
 
     client_data_split_dict = {}
 
@@ -525,13 +551,14 @@ if __name__ == "__main__":
     # 0 corresponds to vanilla reg_mifa
     # 1 corresponds to umifa
     # 2 corresponds to fedavg
-    cmodel = lenet.LeNet()
+    cmodel = network.resnet18() #lenet.LeNet()
     timestr = time.strftime("%Y%m%d-%H%M%S")
 
     for choose_nc in config.no_of_c:
 
         loss_eachlr=[] 
         acc_eachlr=[]
+        test_loss_eachlr=[]
 
         for learning_rate in possible_lr:
 
@@ -539,53 +566,50 @@ if __name__ == "__main__":
             lr=learning_rate
             loss_algo=[] 
             acc_algo =[] 
+            test_loss_algo =[]
             idxs_users_allrounds = [np.random.choice(client_names,choose_nc,replace = False) for i in range(config.n_rnds)]
 
 
             #Run simulation for each algorithm
             for algo in list(d_algo.keys()): 
 
-                if algo == 0:
-                   global_lr = lr = 0.2
-                else:
-                    global_lr = lr = 0.1 
-
-                torch.cuda.empty_cache()
+                global_lr = lr = config.algo_lr[algo]
+                
                 print("--------------------------Algo: {0}------------------------------------".format(d_algo[algo]))     
 
-                server = Server(choose_nc, total_c, global_lr, cluster = config.cluster)
+                server = Server(choose_nc, total_c, global_lr, model = copy.deepcopy(cmodel),cluster = config.cluster)
                 client_object_dict = {}
 
                 for c in client_names:
-                    client_object_dict[c]= Client(c, lr, copy.deepcopy(cmodel))
+                    client_object_dict[c]= Client(c, lr)
                 
                 local_rnd_loss=[]
                 local_rnd_acc=[]
+                rnd_test_loss = []
 
                 #Global epochs
                 for rnd in tqdm(range(config.n_rnds), total = config.n_rnds): # each communication round
                     #schedule(server, mode = 'global')
                     #schedule()
+                    lr = round_schedule(lr, rnd, lrfactor)
 
                     idxs_users=idxs_users_allrounds[rnd]
                     # print("chosen clients",idxs_users)
                     idxs_len=len(idxs_users)
 
-                    #Obtain global weights
-                    global_state_dict=server.global_model.state_dict()
-                
-                    #Assign each client model to global model
-                    for c in idxs_users:  
-                        client_object_dict[c].setWeights(global_state_dict)
+                    # #Obtain global weights
+                    # global_state_dict=server.global_model.state_dict()
+
+                    # #Assign each client model to global model
+                    # for c in idxs_users:  
+                    #     client_object_dict[c].setWeights(global_state_dict)
 
 
                     d_train_losses=0 #loss over all clients
                     for sel_idx in idxs_users:
-                        
                         #Get train loader
                         dtrain_loader = DataLoader(client_data_split_dict[sel_idx], batch_size=config.batch_size, shuffle=True)
-
-                        loss = client_object_dict[sel_idx].local_train(dtrain_loader, tau, rnd, server)
+                        loss = client_object_dict[sel_idx].local_train(dtrain_loader, lr = lr,  model = copy.deepcopy(server.global_model))
                         # print(loss)
 
 
@@ -595,12 +619,16 @@ if __name__ == "__main__":
 
                     #aggregate at server
                     server.aggregate(idxs_users, client_object_dict, algo)
+
+                    #Calculate test acc and loss every plot_every_n epochs
                     if rnd%config.plot_every_n == 0: 
-                        dtest_loader = DataLoader(dataset_test,batch_size = 128, shuffle = False)
-                        acc = server.test(dtest_loader)
+                        dtest_loader = DataLoader(dataset_test,batch_size = config.batch_size, shuffle = False)
+                        acc, val_loss = server.test(dtest_loader)
                         local_rnd_acc.append(acc)
                         local_rnd_loss.append(d_train_losses)
-                        print("Testing acc: ",acc)
+                        rnd_test_loss.append(val_loss)
+                        print("Testing acc: ",acc, "Test loss: ", val_loss)
+
                     # if(rnd==100):
                     #     lr = lr/2
 
@@ -608,11 +636,13 @@ if __name__ == "__main__":
                     print("Rnd {4} - Training Error: {0}, Algo: {2}, n_c: {3}, lr: {1}\n".format(d_train_losses,lr, algo, choose_nc, rnd))
                 loss_algo.append(local_rnd_loss)  
                 acc_algo.append(local_rnd_acc) 
+                test_loss_algo.append(rnd_test_loss)
                 plot_clusters(client_object_dict, choose_nc,algo, timestr)
             loss_eachlr.append(loss_algo)
             acc_eachlr.append(acc_algo)
+            test_loss_eachlr.append(test_loss_algo)
         
-        plot(loss_eachlr, acc_eachlr, choose_nc, timestr)            
+        plot(loss_eachlr, acc_eachlr, test_loss_eachlr,choose_nc, timestr)            
         
 
                 
