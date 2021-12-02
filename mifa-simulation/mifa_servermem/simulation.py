@@ -75,6 +75,7 @@ class Server():
         
         if self.cluster == 1:
             self.n_clusters = config.K #no of clusters
+            print(self.n_clusters, " Clustering active")
 
             #Compute the current cluster center value as a weighted running avg
             self.cluster_center_vals = {}
@@ -120,6 +121,7 @@ class Server():
         #Update client's cluster center index to current cluster 
         if new_clust_cent != -1:
             client_obj[client_id].cluster_center = new_clust_cent
+
         else:
             print("Cluster key for client ", client_id, " not updated")
             print(dist)
@@ -189,6 +191,7 @@ class Server():
 
                     #self.running_av_grads[layer] += (layer_grad - self.clients_alllayer_prevgrad[client][layer])/self.total_c
                     self.clients_alllayer_prevgrad[client][layer] = copy.deepcopy(alllayer_grads[layer])
+
             #print(self.running_av_grads[layer])
             return self.running_av_grads
         
@@ -206,6 +209,8 @@ class Server():
                     #self.running_av_grads[layer] += (layer_grad - self.clients_alllayer_prevgrad[client][layer])/self.total_c
                     self.cluster_center_vals[closest_clustcent][layer] = (0.2*self.cluster_center_vals[closest_clustcent][layer])\
                         + (0.8*alllayer_grads[layer])
+                # print("Client {} belongs to cluster {}".format(client, closest_clustcent))
+                
             #print(self.running_av_grads[layer])
             return self.running_av_grads
 
@@ -327,8 +332,8 @@ def plot_clusters(client_obj_dict, n_c, algo, timestr):
     plt.close()
 
 
-def round_schedule(lr, rnd, lrfactor):
-    if rnd%200==0:
+def round_schedule(lr, rnd, lrfactor, sch_freq):
+    if rnd%sch_freq==0:
         return lr*lrfactor
     else:
          return lr
@@ -427,8 +432,8 @@ def plot(loss_algo, acc_algo, test_loss_algo,n_c, timestr, algo_lr, learning_rat
     plt.ylabel('Loss')
     plt.xlabel('Number of Comm rounds')
     for algo_i, loss_per_algo in enumerate(loss_algo):
-        plt.title('Accuracy vs Comm rounds lr = {0:.2f}, clients = {1}/{2}, lr_decay = {3} '.format(
-            algo_lr[algo_i][learning_rate],n_c, config.total_c, config.lrfactor[algo_i]))  
+        plt.title('Accuracy vs Comm rounds lr = {0:.5f}, clients = {1}/{2}, lr_decay = {3}, local_ep = {4} '.format(
+            algo_lr[algo_i][learning_rate],n_c, config.total_c, config.lrfactor[algo_i], config.local_epochs))  
         plt.plot(np.arange(len(loss_per_algo))*config.plot_every_n, loss_per_algo, label = d_algo[d_algo_keys[algo_i]])
     plt.legend(loc = 'upper right')
     dir_name ="./n_c_"+str(n_c)+"/train/{0}.png".format(timestr)
@@ -442,8 +447,8 @@ def plot(loss_algo, acc_algo, test_loss_algo,n_c, timestr, algo_lr, learning_rat
     plt.ylabel('Test Accuracy')
     plt.xlabel('Number of Comm rounds')
     for algo_i, acc_per_algo in enumerate(acc_algo):
-        plt.title('Accuracy vs Comm rounds lr = {0:.2f}, clients = {1}/{2}, lr_decay = {3} '.format(
-            algo_lr[algo_i][learning_rate],n_c, config.total_c, config.lrfactor[algo_i])) 
+        plt.title('Accuracy vs Comm rounds lr = {0:.5f}, clients = {1}/{2}, lr_decay = {3}, local_ep = {4} '.format(
+            algo_lr[algo_i][learning_rate],n_c, config.total_c, config.lrfactor[algo_i], config.local_epochs)) 
         plt.plot(np.arange(len(acc_per_algo))*config.plot_every_n, acc_per_algo, label = d_algo[d_algo_keys[algo_i]])
     plt.legend(loc = 'lower right')
     dir_name ="./n_c_"+str(n_c)+"/test/{0}.png".format(timestr)
@@ -457,8 +462,8 @@ def plot(loss_algo, acc_algo, test_loss_algo,n_c, timestr, algo_lr, learning_rat
     plt.ylabel('Test Loss')
     plt.xlabel('Number of Comm rounds')
     for algo_i, tstloss_per_algo in enumerate(test_loss_algo):
-        plt.title('Accuracy vs Comm rounds lr = {0:.2f}, clients = {1}/{2}, lr_decay = {3} '.format(
-            algo_lr[algo_i][learning_rate],n_c, config.total_c, config.lrfactor[algo_i]))   
+        plt.title('Accuracy vs Comm rounds lr = {0:.5f}, clients = {1}/{2}, lr_decay = {3}, local_ep = {4} '.format(
+            algo_lr[algo_i][learning_rate],n_c, config.total_c, config.lrfactor[algo_i], config.local_epochs))    
         plt.plot(np.arange(len(tstloss_per_algo))*config.plot_every_n, tstloss_per_algo, label = d_algo[d_algo_keys[algo_i]])
     plt.legend(loc = 'lower right')
     dir_name ="./n_c_"+str(n_c)+"/test_loss/{0}.png".format(timestr)
@@ -534,16 +539,27 @@ if __name__ == "__main__":
     d_algo = config.d_algo
     d_algo_keys = sorted(list(d_algo.keys()))
     lrfactor = config.lrfactor
-
+    sch_freq = config.sch_freq
     client_data_split_dict = {}
+    pi = []
+    for i in list(range(config.total_c)):
+        if int(i/(10))%2==0:
+            pi.append(int(i/(10)))
+        else:
+            pi.append(int(i/(10))-1)
 
+    pi = (np.array(pi)*config.pi_min/9) + (1-config.pi_min)
+    
     for c in client_names:
         client_data_split_dict[c] = DatasetSplit(dataset_train,dict_users[c])
-
-    # 0 corresponds to vanilla reg_mifa
+    
+    # 0 corresponds to mifa
     # 1 corresponds to umifa
     # 2 corresponds to fedavg
-    cmodel = network.resnet18() #lenet.LeNet()
+    if config.model_type == 'r':
+        cmodel = network.resnet18()
+    else: 
+        cmodel = lenet.LeNet()
 
     for choose_nc in config.no_of_c:
 
@@ -556,8 +572,18 @@ if __name__ == "__main__":
             loss_algo=[] 
             acc_algo =[] 
             test_loss_algo =[]
-            idxs_users_allrounds = [np.random.choice(client_names,choose_nc,replace = False) for i in range(config.n_rnds)]
-
+            if config.sel_client_variablepi == True:
+                print("Varible number of clients selected per round")
+                idxs_users_allrounds = []
+                for r in range(config.n_rnds):
+                    clients_participating_bool = []
+                    for c in range(len(pi)):
+                        clients_participating_bool.append(np.random.choice([0,1], p = [1-pi[c],pi[c]]))
+                    p_clients = [ i for i,v in enumerate(clients_participating_bool) if v==1]
+                    idxs_users_allrounds.append(np.array(p_clients))
+            else:
+                idxs_users_allrounds = [np.random.choice(client_names,choose_nc,replace = False) for i in range(config.n_rnds)]
+                
 
             #Run simulation for each algorithm
             for algo in list(d_algo.keys()): 
@@ -580,9 +606,12 @@ if __name__ == "__main__":
                 for rnd in tqdm(range(config.n_rnds), total = config.n_rnds): # each communication round
                     #schedule(server, mode = 'global')
                     #schedule()
-                    lr = round_schedule(lr, rnd, lrfactor[algo])
-
-                    idxs_users=idxs_users_allrounds[rnd]
+                    lr = round_schedule(lr, rnd, lrfactor[algo], sch_freq)
+                    if rnd ==0 and config.enforce_cp_r1 ==1 and algo ==0:
+                        print("Running all clients in first round")
+                        idxs_users = client_names
+                    else:
+                        idxs_users=idxs_users_allrounds[rnd]
                     # print("chosen clients",idxs_users)
                     idxs_len=len(idxs_users)
 
