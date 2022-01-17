@@ -3,7 +3,7 @@ import numpy as np
 
 #Generic Hyp
 batch_size= 64 #Neural Network batch size
-n_rnds= 2000 #Global rounds
+n_rnds= 1500 #Global rounds
 tau=5 #Local rounds --> not in use since we use local epochs
 total_c= 250 #Total no of clients
 no_of_c=[5] #participating clients
@@ -18,7 +18,7 @@ cluster = 0
 model_type = 'r'
 
 #Plotting
-plot_every_n = 100
+plot_every_n = 50
 
 
 

@@ -24,6 +24,7 @@ from torch.nn.utils import parameters_to_vector, vector_to_parameters
 import torch.utils.data as data_utils
 import torch.optim as optim
 import copy
+from shutil import copyfile
 import config
 import os
 import gc
@@ -101,19 +102,26 @@ class Server():
             out.append(vec[layer].view(-1))
         return torch.cat(out)
     
+    def calc_distance(self,vec1, vec2):
+        dist = 0
+        for layer in vec1:
+            dist+= torch.linalg.norm((vec1[layer] - vec2[layer]).view(-1), ord=1)/10
+        return dist
+
     def get_and_update_closest_clust_ind(self,client_id,client_obj):
 
         #iterate over cluster centers (distance:l2)
         min_dist = float('inf')
         new_clust_cent = -1
-        client_update_vect = self.params_to_vec(client_obj[client_id].local_grad_update)
+        client_update_vect = client_obj[client_id].local_grad_update
         for clust_key, clust_val in self.cluster_center_vals.items():
             if clust_val == -1:
                 self.cluster_center_vals[clust_key] = copy.deepcopy(client_obj[client_id].local_grad_update)
                 client_obj[client_id].cluster_center = clust_key
+                print("New cluster found ",client_id, clust_key)
                 return clust_key
-            cluster_vect = self.params_to_vec(self.cluster_center_vals[clust_key])
-            dist = torch.linalg.norm(client_update_vect - cluster_vect)
+            # cluster_vect = self.params_to_vec(self.cluster_center_vals[clust_key])
+            dist = self.calc_distance(client_update_vect,self.cluster_center_vals[clust_key] )#torch.linalg.norm(client_update_vect - cluster_vect)
             if dist < min_dist:
                 min_dist = dist
                 new_clust_cent = clust_key
@@ -121,11 +129,11 @@ class Server():
         #Update client's cluster center index to current cluster 
         if new_clust_cent != -1:
             client_obj[client_id].cluster_center = new_clust_cent
+            print("New cluster found ",client_id, min_dist, new_clust_cent)
 
         else:
             print("Cluster key for client ", client_id, " not updated")
             print(dist)
-            print(cluster_vect)
             print("clv",client_update_vect)
             print("actual ",client_obj[client_id].local_grad_update)
 
@@ -196,10 +204,15 @@ class Server():
             return self.running_av_grads
         
         else:
-            #sum grads from present clients
+            # sum grads from present clients
             for client in ids:
                 alllayer_grads = client_models[client].local_grad_update
                 alllayer_prevgrads = self.get_cluster_prevgrad(client,client_models)
+                if self.cluster_center_vals[0] != -1:
+                    print("\nClient ", client, " gradient norm at cluster 0 is ", self.calc_distance(self.cluster_center_vals[0],self.layers_init))
+                print("gradient norm at cluster: ",self.calc_distance(alllayer_prevgrads,self.layers_init))
+                print("gradient norm at client: ",self.calc_distance(alllayer_grads,self.layers_init))
+
                 closest_clustcent = self.get_and_update_closest_clust_ind(client,client_models)
                 for layer in self.running_av_grads:
                     layer_grad = alllayer_grads[layer].cpu()
@@ -207,11 +220,10 @@ class Server():
                     self.running_av_grads[layer] += (layer_grad - prevgrad)/self.total_c
 
                     #self.running_av_grads[layer] += (layer_grad - self.clients_alllayer_prevgrad[client][layer])/self.total_c
-                    self.cluster_center_vals[closest_clustcent][layer] = (0.2*self.cluster_center_vals[closest_clustcent][layer])\
-                        + (0.8*alllayer_grads[layer])
+                    self.cluster_center_vals[closest_clustcent][layer] = copy.deepcopy(alllayer_grads[layer])# (0.2*self.cluster_center_vals[closest_clustcent][layer])+ (1*alllayer_grads[layer])
                 # print("Client {} belongs to cluster {}".format(client, closest_clustcent))
-                
-            #print(self.running_av_grads[layer])
+                print("here",closest_clustcent, self.calc_distance(client_models[client].local_grad_update,self.layers_init), self.calc_distance(self.cluster_center_vals[closest_clustcent],self.layers_init) )    
+            # print(self.running_av_grads[layer])
             return self.running_av_grads
 
 
@@ -426,15 +438,36 @@ class Client():
         self.model.load_state_dict(global_model_sd)
 
 
+def moving_avg(values):
+    smooth_values=[]
+    k=10
+    lval = len(values) -1
+    for i in range(lval+1):
+        start = max(0,i-k)
+        fin = min(lval, i+k)
+        smooth_values.append(np.mean(values[start:fin]))
+    return values
+
 def plot(loss_algo, acc_algo, test_loss_algo,n_c, timestr, algo_lr, learning_rate):
+    # from scipy.interpolate import make_interp_spline, BSpline
     #plot train loss (local)
+    loss_algo = moving_avg(loss_algo)
+    acc_algo = moving_avg(acc_algo)
+    test_loss_algo = moving_avg(test_loss_algo)
+
     plt.figure(figsize=(10,7)) 
     plt.ylabel('Loss')
     plt.xlabel('Number of Comm rounds')
     for algo_i, loss_per_algo in enumerate(loss_algo):
         plt.title('Accuracy vs Comm rounds lr = {0:.5f}, clients = {1}/{2}, lr_decay = {3}, local_ep = {4} '.format(
             algo_lr[algo_i][learning_rate],n_c, config.total_c, config.lrfactor[algo_i], config.local_epochs))  
-        plt.plot(np.arange(len(loss_per_algo))*config.plot_every_n, loss_per_algo, label = d_algo[d_algo_keys[algo_i]])
+        # xo = np.arange(len(loss_per_algo))*config.plot_every_n
+        # xnew = np.linspace(xo.min(), xo.max(), 600)
+        # spl = make_interp_spline(xo, loss_per_algo) 
+        # y_smooth = spl(xnew)
+        # plt.plot(xnew, y_smooth,  label = d_algo[d_algo_keys[algo_i]])
+        plt.plot(np.arange(len(loss_per_algo))*config.plot_every_n, loss_per_algo,  label = d_algo[d_algo_keys[algo_i]])
+        # plt.plot(, loss_per_algo)
     plt.legend(loc = 'upper right')
     dir_name ="./n_c_"+str(n_c)+"/train/{0}.png".format(timestr)
     if not os.path.exists("./n_c_"+str(n_c)+"/train"):
@@ -449,7 +482,13 @@ def plot(loss_algo, acc_algo, test_loss_algo,n_c, timestr, algo_lr, learning_rat
     for algo_i, acc_per_algo in enumerate(acc_algo):
         plt.title('Accuracy vs Comm rounds lr = {0:.5f}, clients = {1}/{2}, lr_decay = {3}, local_ep = {4} '.format(
             algo_lr[algo_i][learning_rate],n_c, config.total_c, config.lrfactor[algo_i], config.local_epochs)) 
-        plt.plot(np.arange(len(acc_per_algo))*config.plot_every_n, acc_per_algo, label = d_algo[d_algo_keys[algo_i]])
+        # xo = np.arange(len(acc_per_algo))*config.plot_every_n
+        # xnew = np.linspace(xo.min(), xo.max(), 600)
+        # spl = make_interp_spline(xo, acc_per_algo) 
+        # y_smooth = spl(xnew)
+        plt.plot(np.arange(len(acc_per_algo))*config.plot_every_n, acc_per_algo,  label = d_algo[d_algo_keys[algo_i]])
+        # plt.plot(xnew, y_smooth,  label = d_algo[d_algo_keys[algo_i]])
+        #plt.plot(np.arange(len(acc_per_algo))*config.plot_every_n, acc_per_algo, label = d_algo[d_algo_keys[algo_i]])
     plt.legend(loc = 'lower right')
     dir_name ="./n_c_"+str(n_c)+"/test/{0}.png".format(timestr)
     if not os.path.exists("./n_c_"+str(n_c)+"/test"):
@@ -464,8 +503,14 @@ def plot(loss_algo, acc_algo, test_loss_algo,n_c, timestr, algo_lr, learning_rat
     for algo_i, tstloss_per_algo in enumerate(test_loss_algo):
         plt.title('Accuracy vs Comm rounds lr = {0:.5f}, clients = {1}/{2}, lr_decay = {3}, local_ep = {4} '.format(
             algo_lr[algo_i][learning_rate],n_c, config.total_c, config.lrfactor[algo_i], config.local_epochs))    
-        plt.plot(np.arange(len(tstloss_per_algo))*config.plot_every_n, tstloss_per_algo, label = d_algo[d_algo_keys[algo_i]])
-    plt.legend(loc = 'lower right')
+        # xo = np.arange(len(tstloss_per_algo))*config.plot_every_n
+        # xnew = np.linspace(xo.min(), xo.max(), 600)
+        # spl = make_interp_spline(xo, tstloss_per_algo) 
+        # y_smooth = spl(xnew)
+        # plt.plot(xnew, y_smooth,  label = d_algo[d_algo_keys[algo_i]])
+        plt.plot(np.arange(len(tstloss_per_algo))*config.plot_every_n, tstloss_per_algo,  label = d_algo[d_algo_keys[algo_i]])
+        #plt.plot(np.arange(len(tstloss_per_algo))*config.plot_every_n, tstloss_per_algo, label = d_algo[d_algo_keys[algo_i]])
+    plt.legend(loc = 'upper right')
     dir_name ="./n_c_"+str(n_c)+"/test_loss/{0}.png".format(timestr)
     if not os.path.exists("./n_c_"+str(n_c)+"/test_loss"):
         #cwd = os.getcwd()
@@ -557,8 +602,10 @@ if __name__ == "__main__":
     # 1 corresponds to umifa
     # 2 corresponds to fedavg
     if config.model_type == 'r':
+        print("Resnet18")
         cmodel = network.resnet18()
     else: 
+        print("LeNet")
         cmodel = lenet.LeNet()
 
     for choose_nc in config.no_of_c:
@@ -566,12 +613,18 @@ if __name__ == "__main__":
         loss_eachlr=[] 
         acc_eachlr=[]
         test_loss_eachlr=[]
+        global_loss_eachlr = []
 
         for learning_rate in range(len(config.algo_lr[0])):
             timestr = time.strftime("%Y%m%d-%H%M%S")            
             loss_algo=[] 
             acc_algo =[] 
             test_loss_algo =[]
+            global_train_loss_algo = []
+            if not os.path.exists("./n_c_"+str(choose_nc)+"/configfile"):
+            #cwd = os.getcwd()
+                os.makedirs("./n_c_"+str(choose_nc)+"/configfile")
+            copyfile("config.py", "./n_c_"+str(choose_nc)+"/configfile/"+timestr)
             if config.sel_client_variablepi == True:
                 print("Varible number of clients selected per round")
                 idxs_users_allrounds = []
@@ -601,6 +654,7 @@ if __name__ == "__main__":
                 local_rnd_loss=[]
                 local_rnd_acc=[]
                 rnd_test_loss = []
+                rnd_train_loss = []
 
                 #Global epochs
                 for rnd in tqdm(range(config.n_rnds), total = config.n_rnds): # each communication round
@@ -641,11 +695,16 @@ if __name__ == "__main__":
                     #Calculate test acc and loss every plot_every_n epochs
                     if rnd%config.plot_every_n == 0: 
                         dtest_loader = DataLoader(dataset_test,batch_size = config.batch_size, shuffle = False)
+                        dtrain_global_loader = DataLoader(dataset_train,batch_size = config.batch_size, shuffle = False)
                         acc, val_loss = server.test(dtest_loader)
+                        global_train, global_train_loss = server.test(dtrain_global_loader)
                         local_rnd_acc.append(acc)
                         local_rnd_loss.append(d_train_losses)
                         rnd_test_loss.append(val_loss)
+                        rnd_train_loss.append(global_train_loss)
                         print("Testing acc: ",acc, "Test loss: ", val_loss)
+                        print("Global train loss: ", global_train_loss)
+
 
                     # if(rnd==100):
                     #     lr = lr/2
@@ -655,12 +714,21 @@ if __name__ == "__main__":
                 loss_algo.append(local_rnd_loss)  
                 acc_algo.append(local_rnd_acc) 
                 test_loss_algo.append(rnd_test_loss)
+                global_train_loss_algo.append(rnd_train_loss)
                 plot_clusters(client_object_dict, choose_nc,algo, timestr)
             loss_eachlr.append(loss_algo)
             acc_eachlr.append(acc_algo)
             test_loss_eachlr.append(test_loss_algo)
-        
-            plot(loss_algo, acc_algo, test_loss_algo,choose_nc, timestr, config.algo_lr, learning_rate)            
+            global_loss_eachlr.append(global_train_loss_algo)
+            #record final values of loss and acc
+            file_object = open("./n_c_"+str(choose_nc)+"/configfile/"+timestr, 'a')
+            file_object.write("Loss algo: " + str(loss_algo)+"\n")
+            file_object.write("Acc algo: " +str(acc_algo)+"\n")
+            file_object.write("test_loss_algo: "+str(test_loss_algo)+"\n")
+            file_object.write("global_train_loss_algo: "+str(global_train_loss_algo)+"\n")
+            file_object.close()
+
+            plot(global_train_loss_algo, acc_algo, test_loss_algo,choose_nc, timestr, config.algo_lr, learning_rate)            
         
 
                 

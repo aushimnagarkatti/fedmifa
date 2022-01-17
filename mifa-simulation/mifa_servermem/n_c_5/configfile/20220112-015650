@@ -25,8 +25,8 @@ plot_every_n = 100
 #Learning rate
 algo_lr = {  #lr for each algo, length has to be the same for all algos
     0: [1/np.power(10,2.5)],
-    1: [1/np.power(10,2)],
-    2: [1/np.power(10,2)]
+    1: [1/np.power(10,2.5)],
+    2: [1/np.power(10,2.5)]
     }
 
 lrfactor = {
