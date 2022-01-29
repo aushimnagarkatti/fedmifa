@@ -58,6 +58,72 @@ class ResNet(nn.Module):
         return out
 def resnet18():
     return ResNet(BasicBlock, [2,2,2,2])
+
+class MLP(nn.Module):
+    def __init__(self,input_size=784,output_size=62):
+        super(MLP, self).__init__()
+        self.linear1 = nn.Linear(input_size, 62)
+        # self.linear2 = nn.Linear(128, 64)
+        # self.linear3 = nn.Linear(128,output_size)
+        
+    def forward(self, x):
+        x = x.view(-1, 28*28)
+        # x = F.relu(self.linear1(x))
+        # x = F.relu(self.linear2(x))
+        # x = F.relu(self.linear1(x))
+        x = self.linear1(x)
+
+        return(x)
+
+import torch.nn.functional as func
+class LeNetmnist(nn.Module):
+    def __init__(self):
+        super(LeNetmnist, self).__init__()
+        self.conv1 = nn.Conv2d(1, 6, kernel_size=3)
+        self.conv2 = nn.Conv2d(6, 16, kernel_size=3)
+        self.fc1 = nn.Linear(400, 120)
+        self.fc2 = nn.Linear(120, 84)
+        self.fc3 = nn.Linear(84, 62)
+
+    def forward(self, x):
+        x = func.relu(self.conv1(x))
+        x = func.max_pool2d(x, 2)
+        x = func.relu(self.conv2(x))
+        x = func.max_pool2d(x, 2)
+        x = x.view(x.size(0), -1)
+        x = func.relu(self.fc1(x))
+        x = self.fc2(x)
+        x = self.fc3(x)
+        return x
+
+class CNNMnist(nn.Module):
+    def __init__(self):
+        super(CNNMnist, self).__init__()
+        # 1 input image channel, 6 output channels, 3x3 square convolution
+        # kernel
+        self.conv1 = nn.Conv2d(1, 32, 3)
+        self.conv2 = nn.Conv2d(32, 64, 3)
+
+        self.fc1 = nn.Linear(64 * 5 * 5, 256)  # 6*6 from image dimension
+        self.fc2 = nn.Linear(256, 62)
+        # self.ceriation = nn.CrossEntropyLoss()
+
+    def forward(self, x):
+        # Max pooling over a (2, 2) window
+        x = F.max_pool2d(F.relu(self.conv1(x)),2)
+        x = F.max_pool2d(F.relu(self.conv2(x)), 2)
+
+        x = x.view(-1, 64*5*5)
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x
+    
+    # def num_flat_features(self, x):
+    #     size = x.size()[1:]  # all dimensions except the batch dimension
+    #     num_features = 1
+    #     for s in size:
+    #         num_features *= s
+    #     return num_features
 # Residual block
 # class ResidualBlock(nn.Module):
 #     def __init__(self, in_channels, out_channels, stride=1, downsample=None):

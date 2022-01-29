@@ -8,7 +8,7 @@ tau=5 #Local rounds --> not in use since we use local epochs
 total_c= 250 #Total no of clients
 no_of_c=[5] #participating clients
 local_epochs = 5 
-plot_local_train_loss = False
+plot_local_train_loss = True
 
 
 #Cluster
@@ -16,29 +16,28 @@ K= 5        #try for 5,10,20
 cluster = 0
 
 #Model
-model_type = 'cnnmnist'#'cnnmnist' #'r'
+model_type = 'cnnmnist' #'r'
 dataset = 'emnist'#cifar10'
 
 #Plotting
-plot_every_n = 20
+plot_every_n = 100
 
 
 
 #Learning rate
 algo_lr = {  #lr for each algo, length has to be the same for all algos
-    0: [0.05],#[1/np.power(10,2.5)],
-    1: [0.05],#[1/np.power(10,2)],
-    2: [0.05]#[1/np.power(10,2)]
+    0: [1/np.power(10,2.5)],
+    1: [1/np.power(10,2)],
+    2: [1/np.power(10,2)]
     }
 
 lrfactor = {
-    0:1
-    , #factor to reduce lr in scheduler
+    0:1, #factor to reduce lr in scheduler
     1:1,
     2:1
     }
 
-sch_freq = 100 #scheduler every n rounds
+sch_freq = 200 #scheduler every n rounds
 
 
 

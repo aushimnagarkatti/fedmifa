@@ -440,7 +440,7 @@ class Client():
 
 def moving_avg(values):
     smooth_values=[]
-    k=10
+    k=15
     lval = len(values) -1
     for i in range(lval+1):
         start = max(0,i-k)
@@ -519,16 +519,39 @@ def plot(loss_algo, acc_algo, test_loss_algo,n_c, timestr, algo_lr, learning_rat
     #plt.close()
 
 class DatasetSplit(Dataset):
-    def __init__(self, dataset, idxs):
-        self.dataset = dataset
+    def __init__(self, idxs):
         self.idxs = list(idxs)
-
     def __len__(self):
         return len(self.idxs)
 
     def __getitem__(self, item):
-        image, label = self.dataset[self.idxs[item]]
+        image, label = dataset_train[self.idxs[item]]
         return image, label
+
+#To add transforms for EMNIST train and test datset
+class DatasetEMNIST(Dataset):
+    def __init__(self, dataset,transforms, dict_users = None):
+        new_dict_users = {}
+        if dict_users:
+            self.dataset = []
+            i=0
+            for k, v in dict_users.items():
+                new_dict_users[k] = []     
+                for value in v:
+                    self.dataset.append(dataset[value])
+                    new_dict_users[k].append(i)
+                    i+=1
+        else:
+            self.dataset = dataset
+        self.transforms = transforms
+        self.dict_users = new_dict_users
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, item):
+        image, label = self.dataset[item]
+        return self.transforms(image), label
+
 
 
 if __name__ == "__main__":
@@ -569,18 +592,50 @@ if __name__ == "__main__":
 
         
     # dtest_loader=data.get_test_data_loader(test_data, batch_size= batch_size)
+    if config.dataset == 'cifar10':
+        trans_cifar_train = transforms.Compose([transforms.ToTensor(), \
+            #transforms.RandomCrop(24),
+            transforms.RandomHorizontalFlip(0.25),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+        trans_cifar_test = transforms.Compose([transforms.ToTensor(), \
+            #transforms.CenterCrop(24),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+        
+        dataset_train = datasets.CIFAR10('./data/cifar', train=True, download=True, transform=trans_cifar_train)
+        dataset_test = datasets.CIFAR10('./data/cifar', train=False, download=True, transform=trans_cifar_test)
+        dict_users = noniid_partition(dataset_train, config.total_c)
 
-    trans_cifar_train = transforms.Compose([transforms.ToTensor(), \
-        #transforms.RandomCrop(24),
-        transforms.RandomHorizontalFlip(0.25),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
-    trans_cifar_test = transforms.Compose([transforms.ToTensor(), \
-        #transforms.CenterCrop(24),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
-    
-    dataset_train = datasets.CIFAR10('./data/cifar', train=True, download=True, transform=trans_cifar_train)
-    dataset_test = datasets.CIFAR10('./data/cifar', train=False, download=True, transform=trans_cifar_test)
-    dict_users = noniid_partition(dataset_train, config.total_c)
+    elif config.dataset == 'emnist':        
+        emnist_data = np.load('data/emnist_dataset_umifa.npy', allow_pickle= True).item()
+        dataset_train = emnist_data['dataset_train']
+        dataset_test = emnist_data['dataset_test']
+        dict_users_emnist = emnist_data['dict_users']
+        emnist_clients = list(dict_users_emnist.keys())
+        #Pick config.no_of_c number of random clients from the total number of clients in dataset
+        client_names=list(range(config.total_c))
+        total_c = len(client_names)
+
+        chosen_clients = np.random.choice(emnist_clients, total_c)
+        dict_users = {client_names[i]:dict_users_emnist[chosen_clients[i]] for i in range(total_c)}
+        transform =  transforms.Compose([
+                        transforms.ToPILImage(),
+                        transforms.RandomHorizontalFlip(),
+                        transforms.ToTensor(),
+                        transforms.RandomRotation(90),
+                        transforms.Normalize((0.1307,), (0.3081,))])
+        trans_test = transforms.Compose([
+            transforms.ToPILImage(),
+                        # transforms.RandomHorizontalFlip(),
+                        transforms.ToTensor(),
+                        # transforms.RandomRotation(90),
+                        transforms.Normalize((0.1307,), (0.3081,))])
+        dataset_train = DatasetEMNIST(dataset_train, transform, dict_users)
+        dict_users = dataset_train.dict_users
+        dataset_test = DatasetEMNIST(dataset_test, trans_test)
+
+    else:
+        print("Please specify dataset")
+
     d_algo = config.d_algo
     d_algo_keys = sorted(list(d_algo.keys()))
     lrfactor = config.lrfactor
@@ -596,17 +651,28 @@ if __name__ == "__main__":
     pi = (np.array(pi)*config.pi_min/9) + (1-config.pi_min)
     
     for c in client_names:
-        client_data_split_dict[c] = DatasetSplit(dataset_train,dict_users[c])
-    
+        client_data_split_dict[c] = DatasetSplit(dict_users[c])
     # 0 corresponds to mifa
     # 1 corresponds to umifa
     # 2 corresponds to fedavg
     if config.model_type == 'r':
         print("Resnet18")
         cmodel = network.resnet18()
-    else: 
+
+    elif config.model_type == 'cnnmnist':
+        print("network: CNN MNIST")
+        cmodel = network.CNNMnist()
+    elif config.model_type == 'lenetmnist': 
+        print("LeNetmnist")
+        cmodel = network.LeNetmnist()
+    elif config.model_type == 'mlp': 
+        cmodel = network.MLP()
+        print("mlp")
+    elif config.model_type == 'lenet': 
         print("LeNet")
         cmodel = lenet.LeNet()
+    else:
+        print('please choose a network')
 
     for choose_nc in config.no_of_c:
 
@@ -636,7 +702,6 @@ if __name__ == "__main__":
                     idxs_users_allrounds.append(np.array(p_clients))
             else:
                 idxs_users_allrounds = [np.random.choice(client_names,choose_nc,replace = False) for i in range(config.n_rnds)]
-                
 
             #Run simulation for each algorithm
             for algo in list(d_algo.keys()): 
@@ -697,13 +762,16 @@ if __name__ == "__main__":
                         dtest_loader = DataLoader(dataset_test,batch_size = config.batch_size, shuffle = False)
                         dtrain_global_loader = DataLoader(dataset_train,batch_size = config.batch_size, shuffle = False)
                         acc, val_loss = server.test(dtest_loader)
-                        global_train, global_train_loss = server.test(dtrain_global_loader)
+                        if not config.plot_local_train_loss:  
+                            global_train, global_train_loss = server.test(dtrain_global_loader)
+                            rnd_train_loss.append(global_train_loss)
+                            print("Global train loss: ", global_train_loss)
+
                         local_rnd_acc.append(acc)
                         local_rnd_loss.append(d_train_losses)
                         rnd_test_loss.append(val_loss)
-                        rnd_train_loss.append(global_train_loss)
                         print("Testing acc: ",acc, "Test loss: ", val_loss)
-                        print("Global train loss: ", global_train_loss)
+                        
 
 
                     # if(rnd==100):
@@ -727,7 +795,8 @@ if __name__ == "__main__":
             file_object.write("test_loss_algo: "+str(test_loss_algo)+"\n")
             file_object.write("global_train_loss_algo: "+str(global_train_loss_algo)+"\n")
             file_object.close()
-
+            if config.plot_local_train_loss:
+                global_train_loss_algo = loss_algo
             plot(global_train_loss_algo, acc_algo, test_loss_algo,choose_nc, timestr, config.algo_lr, learning_rate)            
         
 

@@ -8,7 +8,7 @@ tau=5 #Local rounds --> not in use since we use local epochs
 total_c= 250 #Total no of clients
 no_of_c=[5] #participating clients
 local_epochs = 5 
-plot_local_train_loss = False
+plot_local_train_loss = True
 
 
 #Cluster
