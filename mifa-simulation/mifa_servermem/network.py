@@ -117,13 +117,42 @@ class CNNMnist(nn.Module):
         x = F.relu(self.fc1(x))
         x = self.fc2(x)
         return x
-    
-    # def num_flat_features(self, x):
-    #     size = x.size()[1:]  # all dimensions except the batch dimension
-    #     num_features = 1
-    #     for s in size:
-    #         num_features *= s
-    #     return num_features
+
+
+
+
+class ShakespeareLstm(torch.nn.Module):
+    def __init__(self, num_classes, hidden_dim=128,
+                 n_recurrent_layers=1, output_dim=128, default_batch_size=32):
+        super(ShakespeareLstm, self).__init__()
+
+        # Word embedding
+        embedding_dim = 8
+        self.embedding = torch.nn.Embedding(num_classes, embedding_dim)
+
+        # Hidden dimensions
+        self.hidden_dim = hidden_dim
+
+        # Number of stacked lstm layers
+        self.n_recurrent_layers = n_recurrent_layers
+
+        # shape of input/output tensors: (batch_dim, seq_dim, feature_dim)
+        self.rnn = torch.nn.GRU(embedding_dim, self.hidden_dim, n_recurrent_layers, batch_first=True)
+        self.fc = torch.nn.Linear(self.hidden_dim, output_dim)
+
+
+    def forward(self, x):
+        x = torch.tensor(x).to(torch.int64)
+        # word embedding
+        x = self.embedding(x)
+        # query RNN
+        out, _ = self.rnn(x)
+        # out, _ = self.rnn(x, (self.h0.detach(), self.c0.detach()))
+
+        # Index hidden state of last time step; out.size = `batch, seq_len, hidden`
+        out = self.fc(out[:, -1, :])
+        return out
+
 # Residual block
 # class ResidualBlock(nn.Module):
 #     def __init__(self, in_channels, out_channels, stride=1, downsample=None):

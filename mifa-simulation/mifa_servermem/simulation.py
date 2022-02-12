@@ -69,6 +69,9 @@ class Server():
         self.layers_init = self.global_model.state_dict()
         self.cluster = cluster #1 to implement clustering
         self.criterion = torch.nn.CrossEntropyLoss()
+        
+        
+            
 
         #initialize each layer's gradient to 0 for a client
         for layer in self.layers_init:
@@ -85,7 +88,7 @@ class Server():
             
 
         self.running_av_grads = copy.deepcopy(self.layers_init)
-      
+        self.c_i = copy.deepcopy(self.layers_init)
         #each client
         for c in range(total_clients):
             self.clients_alllayer_prevgrad[c] = copy.deepcopy(self.layers_init)
@@ -238,7 +241,25 @@ class Server():
                 layer_grad = alllayer_grads[layer].cpu()
                 step[layer] += layer_grad/self.n_c
             
-        return step 
+        return step
+
+
+    def Scaffold(self, ids, client_models):
+        
+        step = copy.deepcopy(self.layers_init)
+        c_i_step = copy.deepcopy(self.layers_init)
+        #add grads from present clients to running avg
+        for client in ids:
+            alllayer_grads = client_models[client].local_grad_update
+            alllayer_delta_ci = client_models[client].delta_c_i
+            for layer in alllayer_grads:
+                layer_grad = alllayer_grads[layer].cpu()
+                layerdeltaci = alllayer_delta_ci[layer].cpu()
+                step[layer] += layer_grad/self.n_c
+                c_i_step[layer] += layerdeltaci/self.n_c 
+            
+        return step, c_i_step
+      
 
     def UMIFA(self, ids, client_models):
 
@@ -276,6 +297,8 @@ class Server():
     #ids are participating client IDS
     def aggregate(self, ids, client_models, algo):
         
+        global_state_dict = self.global_model.state_dict()
+
         # print(self.global_model.state_dict())
         if algo == 0:
             step = self.MIFA(ids, client_models)
@@ -283,16 +306,21 @@ class Server():
             step = self.UMIFA(ids, client_models)
         elif algo ==2:
             step = self.FedAvg(ids, client_models)
+        elif algo ==3:
+            step, delta_c_i = self.Scaffold(ids, client_models)
+            for layer in self.c_i:
+                self.c_i[layer] += delta_c_i[layer]*(self.n_c/self.total_c)
         
         else:
             print("Algo not valid: ", algo)
 
-        global_state_dict = self.global_model.state_dict()
+        
 
         
         for layer in global_state_dict:
             global_state_dict[layer] = global_state_dict[layer].float()
             global_state_dict[layer] += (step[layer])
+        
 
 
         self.global_model.load_state_dict(global_state_dict)           
@@ -395,16 +423,21 @@ class Client():
         self.criterion= torch.nn.CrossEntropyLoss()
         self.cluster_center = -1
         self.local_grad_update = {}
+        self.c_i = {}
+        self.delta_c_i = {}
+
 
     
-    def train(self,train_data_loader,tau,model, lr=0.1):
+    def train(self,train_data_loader, tau,model, lr=0.1, algo = None, c = None, cnt = None):
         avg_loss=0
         #print(self.model.state_dict())
         # print("\n\n\n\n")
-        model = model.cuda()
         optimizer = optim.SGD(model.parameters(), lr=lr, weight_decay=self.weightDecay)
+        model = model.cuda()
+        
         model.train()
         for i, (train_X, lab) in enumerate(train_data_loader):
+            cnt +=1
             #train_X.view(train_X.shape[0],3,32,32).cuda()
             #train_X = train_X.transpose(1,3).cuda() 
             train_X = train_X.cuda()
@@ -413,26 +446,63 @@ class Client():
             out=model.forward(train_X.float())
             loss=self.criterion(out,lab)
             loss.backward()
-            optimizer.step()
-            avg_loss+=float(loss.data)
             
-        loss = avg_loss/len(train_data_loader)    
-        return loss, model
-    
-    def local_train(self,dtrain_loader,lr, model):
+            # if algo == 'scaffold':
+            #     for layer, p in model.named_parameters():    
+            #         self.c_i.setdefault(layer, torch.Tensor([0.0]))
+            #         c_layer = torch.Tensor(c[layer].float()).cuda()
+            #         c_i_layer = torch.Tensor(self.c_i[layer].float()).cuda()
+            #         p.grad = p.grad  +  c_layer -  c_i_layer 
+                 
+            
+            optimizer.step()
 
+            if algo == 'scaffold':
+                model_d = model.state_dict()
+                for layer, p in model.named_parameters():    
+                    self.c_i.setdefault(layer, torch.Tensor([0.0]))
+                    c_layer = torch.Tensor(c[layer].float()).cuda()
+                    c_i_layer = torch.Tensor(self.c_i[layer].float()).cuda()
+                    model_d[layer] = model_d[layer]  -  lr*(c_layer -  c_i_layer) 
+                model.load_state_dict(model_d)
+            avg_loss+=float(loss.data)
+
+        #     print(i, " Loss inside train: ", loss.data.cpu().numpy())
+        # print("/n/n")    
+        loss = avg_loss/len(train_data_loader)    
+        return loss, model, cnt
+    
+    def local_train(self,dtrain_loader,lr, model, algo = None, c = None):
         oldx = model.state_dict()
         loss =0
+        cnt = 0
         #train each client for local epochs
         for epoch in range(config.local_epochs):
-            loss_epoch, model_trained = self.train(dtrain_loader,tau, lr = lr, model = model)
+            loss_epoch, model_trained, cnt = self.train(dtrain_loader, tau, lr = lr, model = model, algo= algo, c=c, cnt = cnt)
             loss+=loss_epoch
         newx = model_trained.cpu().state_dict()
         #print("loss",loss)
-        for layer, val in newx.items():
-            self.local_grad_update[layer] = (newx[layer]-oldx[layer])
+        epoch +=1
+        if algo == 'scaffold':
+            #store y_i in self.local_grad_update 
+            self.local_grad_update = copy.deepcopy(newx)
+            
+            #store delta y_is in self.local_grad_update
+            #also populate c_i and delta c_i
+            for layer, val in newx.items(): #torch.Tensor([0.0])#
+                new_c_i_layer = self.c_i[layer] - c[layer] + ((oldx[layer]-self.local_grad_update[layer])/(cnt*lr))
+                self.delta_c_i.setdefault(layer, 0)
+                self.delta_c_i[layer] = new_c_i_layer-self.c_i[layer]
+                self.c_i[layer] = new_c_i_layer
+                self.local_grad_update[layer] -= oldx[layer]
+            #now, delta_y is is stored in self.local_grad_update, delta_c_i in delta_c_i
+
+        else:
+            for layer, val in newx.items():
+                self.local_grad_update[layer] = (newx[layer]-oldx[layer])
 
         return loss/config.local_epochs
+    
         
     def setWeights(self, global_model_sd):
         self.model.load_state_dict(global_model_sd)
@@ -553,7 +623,6 @@ class DatasetEMNIST(Dataset):
         return self.transforms(image), label
 
 
-
 if __name__ == "__main__":
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -633,6 +702,26 @@ if __name__ == "__main__":
         dict_users = dataset_train.dict_users
         dataset_test = DatasetEMNIST(dataset_test, trans_test)
 
+    
+    elif config.dataset == 'shakespeare':     
+        ALL_LETTERS = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+        NUM_LETTERS = len(ALL_LETTERS)   
+        shakespeare_data = np.load('data/shakespeare/shakespeare_data_umifa.npy', allow_pickle= True).item()
+        dataset_train = shakespeare_data['dataset_train']
+        dataset_test = shakespeare_data['dataset_test']
+        dict_users = shakespeare_data['dict_users']
+        print(len(dict_users.keys()))
+        # emnist_clients = list(dict_users_emnist.keys())
+        #Pick config.no_of_c number of random clients from the total number of clients in dataset
+        # client_names=list(range(config.total_c))
+        # total_c = len(client_names)
+
+        # chosen_clients = np.random.choice(emnist_clients, total_c)
+        # dict_users = {client_names[i]:dict_users_emnist[chosen_clients[i]] for i in range(total_c)}
+        # dataset_train = DatasetEMNIST(dataset_train, transform, dict_users)
+        # dict_users = dataset_train.dict_users
+        # dataset_test = DatasetEMNIST(dataset_test, trans_test)
+
     else:
         print("Please specify dataset")
 
@@ -671,6 +760,9 @@ if __name__ == "__main__":
     elif config.model_type == 'lenet': 
         print("LeNet")
         cmodel = lenet.LeNet()
+    elif config.model_type == 'shakespeare_lstm':
+        print('Shakespeare LSTM')
+        cmodel = network.ShakespeareLstm(num_classes=NUM_LETTERS, default_batch_size = config.batch_size)
     else:
         print('please choose a network')
 
@@ -703,6 +795,9 @@ if __name__ == "__main__":
             else:
                 idxs_users_allrounds = [np.random.choice(client_names,choose_nc,replace = False) for i in range(config.n_rnds)]
 
+            #uncommented
+            # idxs_users_allrounds = [np.random.choice([1],1,replace = False) for i in range(config.n_rnds)]
+
             #Run simulation for each algorithm
             for algo in list(d_algo.keys()): 
 
@@ -722,7 +817,7 @@ if __name__ == "__main__":
                 rnd_train_loss = []
 
                 #Global epochs
-                for rnd in tqdm(range(config.n_rnds), total = config.n_rnds): # each communication round
+                for rnd in (range(config.n_rnds)): # each communication round
                     #schedule(server, mode = 'global')
                     #schedule()
                     lr = round_schedule(lr, rnd, lrfactor[algo], sch_freq)
@@ -746,7 +841,7 @@ if __name__ == "__main__":
                     for sel_idx in idxs_users:
                         #Get train loader
                         dtrain_loader = DataLoader(client_data_split_dict[sel_idx], batch_size=config.batch_size, shuffle=True)
-                        loss = client_object_dict[sel_idx].local_train(dtrain_loader, lr = lr,  model = copy.deepcopy(server.global_model))
+                        loss = client_object_dict[sel_idx].local_train(dtrain_loader, lr = lr,  model = copy.deepcopy(server.global_model), algo = d_algo[algo], c = copy.deepcopy(server.c_i))
                         # print(loss)
 
 
@@ -756,8 +851,10 @@ if __name__ == "__main__":
 
                     #aggregate at server
                     server.aggregate(idxs_users, client_object_dict, algo)
-
-                    #Calculate test acc and loss every plot_every_n epochs
+                    
+                    #Uncomment 
+                    
+                    # Calculate test acc and loss every plot_every_n epochs
                     if rnd%config.plot_every_n == 0: 
                         dtest_loader = DataLoader(dataset_test,batch_size = config.batch_size, shuffle = False)
                         dtrain_global_loader = DataLoader(dataset_train,batch_size = config.batch_size, shuffle = False)
