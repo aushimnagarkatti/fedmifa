@@ -3,7 +3,7 @@ import numpy as np
 
 #Generic Hyp
 batch_size= 64 #Neural Network batch size
-n_rnds= 10 #Global rounds
+n_rnds= 5 #Global rounds
 tau=5 #Local rounds --> not in use since we use local epochs
 total_c= 250 #Total no of clients
 no_of_c=[5] #participating clients
@@ -12,7 +12,7 @@ plot_local_train_loss = True
 
 
 #Cluster
-K= 55        #try for 5,10,20. Number of clusters is predetermined for static
+K= 2        #try for 5,10,20. Number of clusters is predetermined for static
 cluster = 1
 clust_mech = 'dynamic' #'static 
 
@@ -29,8 +29,8 @@ plot_every_n = 1
 algo_lr = {  #lr for each algo, length has to be the same for all algos
     0: [1/np.power(10,2.5)],
     1: [1/np.power(10,2)],
-    2: [1/np.power(10,2)],
-    3: [1/np.power(10,2)]
+    2: [1/np.power(10,3)],
+    3: [0.01]
     }
 
 lrfactor = {
@@ -48,7 +48,7 @@ sch_freq = 200 #scheduler every n rounds
 d_algo = {
             #0: "MIFA",
             1: "UMIFA",
-            #2: "FedAvg",
+            2: "FedAvg",
             #3: "scaffold"
         }
 
@@ -62,3 +62,7 @@ sel_client_variablepi = False #variable no of clients selected each round accord
 enforce_cp_r1 = False #enforce all client part in 1st round
 
 
+Loss algo: [[2.232466299533844, 2.2371870279312134, 2.192237453460693, 2.223420240879059, 2.206155643463134], [2.2804142451286316, 2.289326567649841, 2.2554645109176636, 2.283399996757507, 2.2634473299980167]]
+Acc algo: [[tensor(0.1719), tensor(0.1562), tensor(0.1094), tensor(0.1094), tensor(0.1250)], [tensor(0.0469), tensor(0.0781), tensor(0.0938), tensor(0.1250), tensor(0.0938)]]
+test_loss_algo: [[2.2930550575256348, 2.292057991027832, 2.2913594245910645, 2.2922346591949463, 2.289949655532837], [2.2946505546569824, 2.2945683002471924, 2.2949087619781494, 2.2945024967193604, 2.294527530670166]]
+global_train_loss_algo: [[], []]

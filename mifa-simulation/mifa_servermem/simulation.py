@@ -7,6 +7,7 @@
 
 from matplotlib.colors import LinearSegmentedColormap
 from numpy.random.mtrand import standard_cauchy
+from sklearn import cluster
 import torch
 from torch._C import _nccl_all_reduce
 import network
@@ -48,18 +49,33 @@ def noniid_partition(dataset, num_users):
     idxs_labels = np.vstack((idxs, labels))
     idxs_labels = idxs_labels[:,idxs_labels[1,:].argsort()]
     idxs = idxs_labels[0,:]
-
+    dict_cluster = {}
+    dict_cluster_counter = 0
+    cluster_id = [i for i in range(num_users)]
     # divide and assign
     for i in range(num_users):
         rand_set = set(np.random.choice(idx_shard, 2, replace=False))
         idx_shard = list(set(idx_shard) - rand_set)
         for rand in rand_set:
             dict_users[i] = np.concatenate((dict_users[i], idxs[rand*num_imgs:(rand+1)*num_imgs]), axis=0)
-    return dict_users
+    
+    for i in range(num_users):
+      a = np.sort([labels[dict_users[i][0]],labels[dict_users[i][num_imgs]]])
+      a = (a[0],a[1])
+
+      # print (a)
+      if(a in dict_cluster):
+        cluster_id[i] = dict_cluster[a]
+      else:
+        dict_cluster[a] = dict_cluster_counter
+        cluster_id[i] = dict_cluster[a]
+        dict_cluster_counter = dict_cluster_counter + 1
+
+    return dict_users, cluster_id, dict_cluster_counter
 
 class Server():
 
-    def __init__(self, n_c, total_clients, global_lr, model, cluster =0):
+    def __init__(self, n_c, total_clients, global_lr, model, cluster =0, num_clusters = None, dynamic_clust = False):
         
         self.n_c = n_c
         self.global_lr = global_lr
@@ -69,7 +85,7 @@ class Server():
         self.layers_init = self.global_model.state_dict()
         self.cluster = cluster #1 to implement clustering
         self.criterion = torch.nn.CrossEntropyLoss()
-        
+        self.dynamic_clust = dynamic_clust
         
             
 
@@ -78,8 +94,8 @@ class Server():
             self.layers_init[layer] = torch.zeros_like(self.layers_init[layer], dtype=torch.float64)
         
         if self.cluster == 1:
-            self.n_clusters = config.K #no of clusters
-            print(self.n_clusters, " Clustering active")
+            self.n_clusters = num_clusters #no of clusters
+            print(self.n_clusters, " Clusters")
 
             #Compute the current cluster center value as a weighted running avg
             self.cluster_center_vals = {}
@@ -121,7 +137,7 @@ class Server():
             if clust_val == -1:
                 self.cluster_center_vals[clust_key] = copy.deepcopy(client_obj[client_id].local_grad_update)
                 client_obj[client_id].cluster_center = clust_key
-                print("New cluster found ",client_id, clust_key)
+                # print("New cluster found ",client_id, clust_key)
                 return clust_key
             # cluster_vect = self.params_to_vec(self.cluster_center_vals[clust_key])
             dist = self.calc_distance(client_update_vect,self.cluster_center_vals[clust_key] )#torch.linalg.norm(client_update_vect - cluster_vect)
@@ -132,13 +148,13 @@ class Server():
         #Update client's cluster center index to current cluster 
         if new_clust_cent != -1:
             client_obj[client_id].cluster_center = new_clust_cent
-            print("New cluster found ",client_id, min_dist, new_clust_cent)
+            # print("New cluster found ",client_id, min_dist, new_clust_cent)
 
-        else:
-            print("Cluster key for client ", client_id, " not updated")
-            print(dist)
-            print("clv",client_update_vect)
-            print("actual ",client_obj[client_id].local_grad_update)
+        # else:
+        #     print("Cluster key for client ", client_id, " not updated")
+        #     print(dist)
+        #     print("clv",client_update_vect)
+        #     print("actual ",client_obj[client_id].local_grad_update)
 
         
         #return closest cluster index
@@ -147,10 +163,14 @@ class Server():
     
     def get_cluster_prevgrad(self,id,client_obj):
         clust_ind =  client_obj[id].cluster_center
-        if clust_ind != -1:
-            return self.cluster_center_vals[clust_ind]
+        if self.dynamic_clust:
+            if clust_ind != -1:
+                return self.cluster_center_vals[clust_ind]
         else:
-            return self.layers_init
+            if self.cluster_center_vals[clust_ind] != -1:
+                return self.cluster_center_vals[clust_ind]
+
+        return copy.deepcopy(self.layers_init)
 
 
     def MIFA_add(self, ids, client_models):
@@ -188,8 +208,8 @@ class Server():
         
     def MIFA(self, ids, client_models):
 
-        if self.cluster ==0:
-            #sum grads from present clients
+        #if self.cluster ==0:
+        #sum grads from present clients
             for client in ids:
                 alllayer_grads = client_models[client].local_grad_update
                 for layer in self.running_av_grads:
@@ -206,28 +226,28 @@ class Server():
             #print(self.running_av_grads[layer])
             return self.running_av_grads
         
-        else:
-            # sum grads from present clients
-            for client in ids:
-                alllayer_grads = client_models[client].local_grad_update
-                alllayer_prevgrads = self.get_cluster_prevgrad(client,client_models)
-                if self.cluster_center_vals[0] != -1:
-                    print("\nClient ", client, " gradient norm at cluster 0 is ", self.calc_distance(self.cluster_center_vals[0],self.layers_init))
-                print("gradient norm at cluster: ",self.calc_distance(alllayer_prevgrads,self.layers_init))
-                print("gradient norm at client: ",self.calc_distance(alllayer_grads,self.layers_init))
+        # else:
+        #     # sum grads from present clients
+        #     for client in ids:
+        #         alllayer_grads = client_models[client].local_grad_update
+        #         alllayer_prevgrads = self.get_cluster_prevgrad(client,client_models)
+        #         if self.cluster_center_vals[0] != -1:
+        #             print("\nClient ", client, " gradient norm at cluster 0 is ", self.calc_distance(self.cluster_center_vals[0],self.layers_init))
+        #         print("gradient norm at cluster: ",self.calc_distance(alllayer_prevgrads,self.layers_init))
+        #         print("gradient norm at client: ",self.calc_distance(alllayer_grads,self.layers_init))
 
-                closest_clustcent = self.get_and_update_closest_clust_ind(client,client_models)
-                for layer in self.running_av_grads:
-                    layer_grad = alllayer_grads[layer].cpu()
-                    prevgrad = alllayer_prevgrads[layer].cpu() 
-                    self.running_av_grads[layer] += (layer_grad - prevgrad)/self.total_c
+        #         closest_clustcent = self.get_and_update_closest_clust_ind(client,client_models)
+        #         for layer in self.running_av_grads:
+        #             layer_grad = alllayer_grads[layer].cpu()
+        #             prevgrad = alllayer_prevgrads[layer].cpu() 
+        #             self.running_av_grads[layer] += (layer_grad - prevgrad)/self.total_c
 
-                    #self.running_av_grads[layer] += (layer_grad - self.clients_alllayer_prevgrad[client][layer])/self.total_c
-                    self.cluster_center_vals[closest_clustcent][layer] = copy.deepcopy(alllayer_grads[layer])# (0.2*self.cluster_center_vals[closest_clustcent][layer])+ (1*alllayer_grads[layer])
-                # print("Client {} belongs to cluster {}".format(client, closest_clustcent))
-                print("here",closest_clustcent, self.calc_distance(client_models[client].local_grad_update,self.layers_init), self.calc_distance(self.cluster_center_vals[closest_clustcent],self.layers_init) )    
-            # print(self.running_av_grads[layer])
-            return self.running_av_grads
+        #             #self.running_av_grads[layer] += (layer_grad - self.clients_alllayer_prevgrad[client][layer])/self.total_c
+        #             self.cluster_center_vals[closest_clustcent][layer] = copy.deepcopy(alllayer_grads[layer])# (0.2*self.cluster_center_vals[closest_clustcent][layer])+ (1*alllayer_grads[layer])
+        #         # print("Client {} belongs to cluster {}".format(client, closest_clustcent))
+        #         print("here",closest_clustcent, self.calc_distance(client_models[client].local_grad_update,self.layers_init), self.calc_distance(self.cluster_center_vals[closest_clustcent],self.layers_init) )    
+        #     # print(self.running_av_grads[layer])
+        #     return self.running_av_grads
 
 
 
@@ -276,21 +296,46 @@ class Server():
                     self.running_av_grads[layer] += (layer_grad - prevgrad)/self.total_c                
                     self.clients_alllayer_prevgrad[client][layer] = copy.deepcopy(alllayer_grads[layer])
             return umifa_step
+
         else:
+            clusts_freq = {}
             umifa_step = copy.deepcopy(self.layers_init)
             running_avg_t = copy.deepcopy(self.running_av_grads)
             #add grads from present clients to running avg
             for client in ids:
                 alllayer_grads = client_models[client].local_grad_update
+                
                 alllayer_prevgrads = self.get_cluster_prevgrad(client,client_models)
-                closest_clustcent = self.get_and_update_closest_clust_ind(client,client_models)
+                if self.dynamic_clust:
+                    closest_clustcent = self.get_and_update_closest_clust_ind(client,client_models)
+                else:
+                    closest_clustcent = client_models[client].cluster_center
+                    if self.cluster_center_vals[closest_clustcent] == -1:
+                        self.cluster_center_vals[closest_clustcent] = copy.deepcopy(self.layers_init)
+                clusts_freq.setdefault(closest_clustcent,0)
+                if closest_clustcent in clusts_freq:
+                    clusts_freq[closest_clustcent]+=1
+                # sum = 0
+                # spr = 0
                 for layer in self.running_av_grads:
                     layer_grad = alllayer_grads[layer].cpu()
                     prevgrad = alllayer_prevgrads[layer].cpu()
+                    # prevgrad_noclust = self.clients_alllayer_prevgrad[client][layer].cpu()
                     umifa_step[layer] = (running_avg_t[layer] + layer_grad - prevgrad)/self.n_c
-                    self.running_av_grads[layer] += (layer_grad - prevgrad)/self.total_c                
-                    self.cluster_center_vals[closest_clustcent][layer] = (0.2*self.cluster_center_vals[closest_clustcent][layer])\
-                        + (0.8*alllayer_grads[layer])
+                    self.running_av_grads[layer] += (layer_grad - prevgrad)/self.total_c       
+                     #  + (1*alllayer_grads[layer])
+                    if clusts_freq[closest_clustcent] == 0:
+                        self.cluster_center_vals[closest_clustcent][layer] = copy.deepcopy(alllayer_grads[layer])
+                        clusts_freq[closest_clustcent] +=1
+                    else:
+                        self.cluster_center_vals[closest_clustcent][layer] = ((self.cluster_center_vals[closest_clustcent][layer]*clusts_freq[closest_clustcent]) + 
+                            alllayer_grads[layer])/(clusts_freq[closest_clustcent]+1)
+                        clusts_freq[closest_clustcent] +=1
+                    # self.clients_alllayer_prevgrad[client][layer] = copy.deepcopy(alllayer_grads[layer])# (0*self.cluster_center_vals[closest_clustcent][layer]) \
+                    
+                    # sum+=np.linalg.norm(prevgrad)
+                    # spr+=np.linalg.norm(prevgrad_noclust)
+                # print(client, "Cluster num: ",closest_clustcent, "Grad norm: ", sum, spr)
             return umifa_step
 
 
@@ -354,13 +399,18 @@ class Server():
     
     
     
-def plot_clusters(client_obj_dict, n_c, algo, timestr):
-    final_clusters = np.zeros(config.K)
+def plot_clusters(client_obj_dict, n_c, algo, timestr, num_clusters = config.K):
+    if config.clust_mech == 'dynamic':
+        final_clusters = np.zeros(config.K)
+        bins = list(range(config.K))
+    else:
+        final_clusters = np.zeros(num_clusters)
+        bins = list(range(num_clusters))
     for c in client_obj_dict:
         clust = client_obj_dict[c].cluster_center
         if clust !=-1:
             final_clusters[clust]+=1
-    bins = list(range(config.K))
+    
     plt.title("Distribution of clusters after experiment Algo: "+ config.d_algo[algo])
     plt.bar(bins,final_clusters)#,bins = bins, density = False)
     plt.ylabel('Number of clients')
@@ -413,7 +463,7 @@ def schedule(server= None, mode = 'local'):
 
 class Client():
 
-    def __init__(self, id, lr):
+    def __init__(self, id, lr, cluster_id_i):
         self.id = id
         self.lr = lr
         #model = model 
@@ -421,7 +471,8 @@ class Client():
         # self.model = model
         self.weightDecay = 5e-5
         self.criterion= torch.nn.CrossEntropyLoss()
-        self.cluster_center = -1
+        
+        self.cluster_center = cluster_id_i
         self.local_grad_update = {}
         self.c_i = {}
         self.delta_c_i = {}
@@ -510,12 +561,13 @@ class Client():
 
 def moving_avg(values):
     smooth_values=[]
-    k=15
+    k=1
     lval = len(values) -1
     for i in range(lval+1):
         start = max(0,i-k)
         fin = min(lval, i+k)
-        smooth_values.append(np.mean(values[start:fin]))
+        if fin>start:
+            smooth_values.append(np.mean(values[start:fin]))
     return values
 
 def plot(loss_algo, acc_algo, test_loss_algo,n_c, timestr, algo_lr, learning_rate):
@@ -527,6 +579,9 @@ def plot(loss_algo, acc_algo, test_loss_algo,n_c, timestr, algo_lr, learning_rat
 
     plt.figure(figsize=(10,7)) 
     plt.ylabel('Loss')
+
+
+    
     plt.xlabel('Number of Comm rounds')
     for algo_i, loss_per_algo in enumerate(loss_algo):
         plt.title('Accuracy vs Comm rounds lr = {0:.5f}, clients = {1}/{2}, lr_decay = {3}, local_ep = {4} '.format(
@@ -672,7 +727,7 @@ if __name__ == "__main__":
         
         dataset_train = datasets.CIFAR10('./data/cifar', train=True, download=True, transform=trans_cifar_train)
         dataset_test = datasets.CIFAR10('./data/cifar', train=False, download=True, transform=trans_cifar_test)
-        dict_users = noniid_partition(dataset_train, config.total_c)
+        dict_users, cluster_id, num_clusters = noniid_partition(dataset_train, config.total_c)
 
     elif config.dataset == 'emnist':        
         emnist_data = np.load('data/emnist_dataset_umifa.npy', allow_pickle= True).item()
@@ -707,6 +762,7 @@ if __name__ == "__main__":
         ALL_LETTERS = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
         NUM_LETTERS = len(ALL_LETTERS)   
         shakespeare_data = np.load('data/shakespeare/shakespeare_data_umifa.npy', allow_pickle= True).item()
+        user_to_play_map =  np.load('data/shakespeare/user_to_play_map.npy', allow_pickle= True).item()
         dataset_train = shakespeare_data['dataset_train']
         dataset_test = shakespeare_data['dataset_test']
         dict_users = shakespeare_data['dict_users']
@@ -724,7 +780,16 @@ if __name__ == "__main__":
 
     else:
         print("Please specify dataset")
+        raise ValueError("Invalid dataset argument")
 
+    if config.clust_mech == 'dynamic':
+        print("Dynamic clustering")
+        num_clusters = config.K
+        cluster_id = None
+        dynamic_clust = 1
+    else:
+        print("Static clustering")
+        dynamic_clust =0
     d_algo = config.d_algo
     d_algo_keys = sorted(list(d_algo.keys()))
     lrfactor = config.lrfactor
@@ -796,7 +861,7 @@ if __name__ == "__main__":
                 idxs_users_allrounds = [np.random.choice(client_names,choose_nc,replace = False) for i in range(config.n_rnds)]
 
             #uncommented
-            # idxs_users_allrounds = [np.random.choice([1],1,replace = False) for i in range(config.n_rnds)]
+            #idxs_users_allrounds = [np.random.choice([1,2,3,4,5],5,replace = False) for i in range(config.n_rnds)]
 
             #Run simulation for each algorithm
             for algo in list(d_algo.keys()): 
@@ -805,11 +870,15 @@ if __name__ == "__main__":
                 
                 print("--------------------------Algo: {0}------------------------------------".format(d_algo[algo]))     
 
-                server = Server(choose_nc, total_c, global_lr, model = copy.deepcopy(cmodel),cluster = config.cluster)
+                server = Server(choose_nc, total_c, global_lr, model = copy.deepcopy(cmodel),cluster = config.cluster, num_clusters= num_clusters, dynamic_clust = dynamic_clust)
                 client_object_dict = {}
 
                 for c in client_names:
-                    client_object_dict[c]= Client(c, lr)
+                    if cluster_id:
+                        cluster_id_i = cluster_id[c]
+                    else:
+                        cluster_id_i = -1
+                    client_object_dict[c]= Client(c, lr, cluster_id_i)
                 
                 local_rnd_loss=[]
                 local_rnd_acc=[]
@@ -880,17 +949,17 @@ if __name__ == "__main__":
                 acc_algo.append(local_rnd_acc) 
                 test_loss_algo.append(rnd_test_loss)
                 global_train_loss_algo.append(rnd_train_loss)
-                plot_clusters(client_object_dict, choose_nc,algo, timestr)
+                plot_clusters(client_object_dict, choose_nc,algo, timestr, num_clusters = num_clusters)
             loss_eachlr.append(loss_algo)
             acc_eachlr.append(acc_algo)
             test_loss_eachlr.append(test_loss_algo)
             global_loss_eachlr.append(global_train_loss_algo)
             #record final values of loss and acc
             file_object = open("./n_c_"+str(choose_nc)+"/configfile/"+timestr, 'a')
-            file_object.write("Loss algo: " + str(loss_algo)+"\n")
-            file_object.write("Acc algo: " +str(acc_algo)+"\n")
-            file_object.write("test_loss_algo: "+str(test_loss_algo)+"\n")
-            file_object.write("global_train_loss_algo: "+str(global_train_loss_algo)+"\n")
+            file_object.write("loss_algo = " + str(loss_algo)+"\n")
+            file_object.write("acc_algo = " +str(np.array(acc_algo))+"\n")
+            file_object.write("test_loss_algo= "+str(test_loss_algo)+"\n")
+            file_object.write("global_train_loss_algo = "+str(global_train_loss_algo)+"\n")
             file_object.close()
             if config.plot_local_train_loss:
                 global_train_loss_algo = loss_algo

@@ -12,7 +12,7 @@ plot_local_train_loss = True
 
 
 #Cluster
-K= 55        #try for 5,10,20. Number of clusters is predetermined for static
+K= 2        #try for 5,10,20. Number of clusters is predetermined for static
 cluster = 1
 clust_mech = 'dynamic' #'static 
 
@@ -29,8 +29,8 @@ plot_every_n = 1
 algo_lr = {  #lr for each algo, length has to be the same for all algos
     0: [1/np.power(10,2.5)],
     1: [1/np.power(10,2)],
-    2: [1/np.power(10,2)],
-    3: [1/np.power(10,2)]
+    2: [1/np.power(10,3)],
+    3: [0.01]
     }
 
 lrfactor = {
@@ -62,3 +62,7 @@ sel_client_variablepi = False #variable no of clients selected each round accord
 enforce_cp_r1 = False #enforce all client part in 1st round
 
 
+Loss algo: [[2.070771842002869, 2.230846267938614, 2.1964696753025055, 2.116454459428787, 2.143797739744186, 2.0938691437244414, 1.8371155862510204, 2.0385701876878737, 1.7842357158660889, 1.9308880561590194]]
+Acc algo: [[tensor(0.1406), tensor(0.1406), tensor(0.1406), tensor(0.1094), tensor(0.1250), tensor(0.0938), tensor(0.1406), tensor(0.1250), tensor(0.1250), tensor(0.1406)]]
+test_loss_algo: [[2.30588960647583, 2.3037493228912354, 2.305553913116455, 2.303238868713379, 2.2995307445526123, 2.295694589614868, 2.2882461547851562, 2.2940213680267334, 2.3085033893585205, 2.3067679405212402]]
+global_train_loss_algo: [[]]

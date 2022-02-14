@@ -1,0 +1,68 @@
+import lenet
+import numpy as np
+
+#Generic Hyp
+batch_size= 64 #Neural Network batch size
+n_rnds= 1000 #Global rounds
+tau=5 #Local rounds --> not in use since we use local epochs
+total_c= 250 #Total no of clients
+no_of_c=[5] #participating clients
+local_epochs = 5 
+plot_local_train_loss = True
+
+
+#Cluster
+K= 55        #try for 5,10,20. Number of clusters is predetermined for static
+cluster = 1
+clust_mech = 'dynamic' #'static 
+
+#Model
+model_type = 'lenet' #shakespeare_lstm' #'shakespeare_lstm'#'cnnmnist'#'cnnmnist' #'r'
+dataset = 'cifar10'
+
+#Plotting
+plot_every_n = 50
+
+
+
+#Learning rate
+algo_lr = {  #lr for each algo, length has to be the same for all algos
+    0: [1/np.power(10,2.5)],
+    1: [1/np.power(10,2)],
+    2: [1/np.power(10,3)],
+    3: [0.01]
+    }
+
+lrfactor = {
+    0:1, #factor to reduce lr in scheduler
+    1:1,
+    2:1,
+    3:1
+    }
+
+sch_freq = 200 #scheduler every n rounds
+
+
+
+#select algos to run
+d_algo = {
+            #0: "MIFA",
+            1: "UMIFA",
+            2: "FedAvg",
+            #3: "scaffold"
+        }
+
+
+
+
+#MIFA paper paradigm variables
+#p_i min is for the paper's paradigm for client selection, each client is selected with a min prob of 0.2
+pi_min = 0.2
+sel_client_variablepi = False #variable no of clients selected each round according to pi assigned
+enforce_cp_r1 = False #enforce all client part in 1st round
+
+
+Loss algo: [[2.206734699010849, 0.8696591232251377, 0.7567910277098416, 0.704686507996521, 0.6635343783767894, 0.7739208948612213, 0.6518363512936048, 0.7275419674813748, 0.5589233102882281, 0.789041625857353, 0.7534290803968905, 0.635661699734628, 0.768404485285282, 0.6931484048767016, 0.682136595621705, 0.8298882257938385, 0.8310900117456914, 0.4695974396838574, 0.9151101161539554, 0.6278409513947554], [2.280843803882599, 2.354242675304413, 2.2669448518753055, 2.2749501562118533, 2.2546241545677184, 1.6726417887210847, 0.6801277805492282, 0.816504019200802, 0.598170386152342, 0.9491703210771085, 0.7603421026468278, 0.7184235667437315, 0.7843120178580285, 0.6600983452890068, 0.5408163578808308, 0.6802380020916461, 0.6952758145332336, 0.3689900981052779, 0.7186438168212772, 0.3954467523191124]]
+Acc algo: [[tensor(0.0469), tensor(0.0938), tensor(0.1406), tensor(0.2812), tensor(0.2656), tensor(0.3594), tensor(0.2188), tensor(0.2344), tensor(0.2344), tensor(0.2188), tensor(0.2031), tensor(0.3281), tensor(0.3125), tensor(0.3281), tensor(0.3438), tensor(0.2500), tensor(0.3750), tensor(0.2344), tensor(0.3438), tensor(0.2969)], [tensor(0.0625), tensor(0.0781), tensor(0.0781), tensor(0.1875), tensor(0.2188), tensor(0.2500), tensor(0.1875), tensor(0.2656), tensor(0.1094), tensor(0.1875), tensor(0.1875), tensor(0.2500), tensor(0.2656), tensor(0.2031), tensor(0.2344), tensor(0.2031), tensor(0.2344), tensor(0.1406), tensor(0.2344), tensor(0.3594)]]
+test_loss_algo: [[2.3067445755004883, 2.608774185180664, 2.2848429679870605, 2.0995919704437256, 2.0728745460510254, 1.9700698852539062, 2.0961532592773438, 2.081493854522705, 1.9424738883972168, 2.0639431476593018, 2.056999921798706, 1.9725353717803955, 2.0179195404052734, 2.001216173171997, 1.871267318725586, 2.0762572288513184, 1.915665864944458, 2.169058322906494, 1.8592280149459839, 2.0869147777557373], [2.3095216751098633, 2.3092193603515625, 2.3032917976379395, 2.284942865371704, 2.232419729232788, 2.106534481048584, 2.898789644241333, 2.135845899581909, 2.4977529048919678, 2.465088129043579, 2.529186964035034, 2.236387252807617, 2.4135916233062744, 2.3723175525665283, 2.030442237854004, 2.5722217559814453, 2.329071521759033, 2.3454606533050537, 2.210867166519165, 2.003582239151001]]
+global_train_loss_algo: [[], []]

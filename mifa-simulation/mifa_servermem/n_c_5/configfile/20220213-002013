@@ -3,7 +3,7 @@ import numpy as np
 
 #Generic Hyp
 batch_size= 64 #Neural Network batch size
-n_rnds= 10 #Global rounds
+n_rnds= 3 #Global rounds
 tau=5 #Local rounds --> not in use since we use local epochs
 total_c= 250 #Total no of clients
 no_of_c=[5] #participating clients
@@ -12,7 +12,7 @@ plot_local_train_loss = True
 
 
 #Cluster
-K= 55        #try for 5,10,20. Number of clusters is predetermined for static
+K= 2        #try for 5,10,20. Number of clusters is predetermined for static
 cluster = 1
 clust_mech = 'dynamic' #'static 
 
@@ -29,8 +29,8 @@ plot_every_n = 1
 algo_lr = {  #lr for each algo, length has to be the same for all algos
     0: [1/np.power(10,2.5)],
     1: [1/np.power(10,2)],
-    2: [1/np.power(10,2)],
-    3: [1/np.power(10,2)]
+    2: [1/np.power(10,3)],
+    3: [0.01]
     }
 
 lrfactor = {
@@ -62,3 +62,7 @@ sel_client_variablepi = False #variable no of clients selected each round accord
 enforce_cp_r1 = False #enforce all client part in 1st round
 
 
+Loss algo: [[2.243733718395233, 2.223952368497849, 2.203428394794464]]
+Acc algo: [[tensor(0.1406), tensor(0.1406), tensor(0.1406)]]
+test_loss_algo: [[2.29915714263916, 2.293724775314331, 2.296079158782959]]
+global_train_loss_algo: [[]]
