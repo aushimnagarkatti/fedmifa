@@ -1,0 +1,68 @@
+import lenet
+import numpy as np
+
+#Generic Hyp
+batch_size= 64 #Neural Network batch size
+n_rnds= 1500 #Global rounds
+tau=5 #Local rounds --> not in use since we use local epochs
+total_c= 250 #Total no of clients
+no_of_c=[5] #participating clients
+local_epochs = 5 
+plot_local_train_loss = True
+
+
+#Cluster
+K= 36 #55        #try for 5,10,20. Number of clusters is predetermined for static
+cluster = 1
+clust_mech = 'static' #'static 
+
+#Model
+model_type = 'shakespeare_lstm' #shakespeare_lstm' #'shakespeare_lstm'#'cnnmnist'#'cnnmnist' #'r'
+dataset = 'shakespeare'
+
+#Plotting
+plot_every_n = 50
+
+
+
+#Learning rate
+algo_lr = {  #lr for each algo, length has to be the same for all algos
+    0: [1/np.power(10,2)],
+    1: [1/np.power(10,1.5)],
+    2: [1/np.power(10,1.5)],
+    3: [1/np.power(10,1.5)]
+    }
+
+lrfactor = {
+    0:1, #factor to reduce lr in scheduler
+    1:1,
+    2:0.5,
+    3:0.5
+    }
+
+sch_freq = 200 #scheduler every n rounds
+
+
+
+#select algos to run
+d_algo = {
+            #0: "MIFA",
+           1: "UMIFA",
+           # 2: "FedAvg",
+            #3: "scaffold"
+        }
+
+
+
+
+#MIFA paper paradigm variables
+#p_i min is for the paper's paradigm for client selection, each client is selected with a min prob of 0.2
+pi_min = 0.2
+sel_client_variablepi = False #variable no of clients selected each round according to pi assigned
+enforce_cp_r1 = False #enforce all client part in 1st round
+
+
+loss_algo = [[4.134552749006739, 2.5661455801098954, 2.295703972779024, 2.286873409841127, 2.17570591803612, 2.1028063330866535, 2.053177530654505, 2.0664958955405455, 1.941665537737769, 2.0089330803634526, 1.9033046698570253, 1.960055633949511, 1.851482141988519, 1.811459802008017, 1.8414310936019258, 1.754387002254776, 1.7993603283857815, 1.824953072307661, 1.7884006474953071, 1.8140168788201732, 1.7149616933066139, 1.6508161496056448, 1.678080085714658, 1.7175446364325881, 1.644699634161147, 1.6724428868013796, 1.6406062449645167, 1.5908950238492752, 1.633291641846324, 1.6282942719408708]]
+acc_algo = [[tensor(0.1250), tensor(0.2031), tensor(0.2812), tensor(0.3281), tensor(0.3281), tensor(0.3438), tensor(0.3750), tensor(0.3594), tensor(0.3125), tensor(0.3594), tensor(0.3438), tensor(0.3906), tensor(0.3750), tensor(0.3750), tensor(0.4062), tensor(0.4531), tensor(0.4688), tensor(0.4688), tensor(0.4688), tensor(0.5000), tensor(0.5000), tensor(0.4688), tensor(0.4844), tensor(0.5156), tensor(0.4844), tensor(0.5156), tensor(0.5000), tensor(0.5000), tensor(0.5312), tensor(0.4844)]]
+test_loss_algo= [[4.600222110748291, 2.5415947437286377, 2.4033737182617188, 2.199152946472168, 2.1593942642211914, 2.096021890640259, 2.0493886470794678, 2.0413825511932373, 2.0453810691833496, 2.0129005908966064, 1.942513346672058, 1.8989919424057007, 1.908199429512024, 1.8480589389801025, 1.8204182386398315, 1.780024766921997, 1.7332862615585327, 1.7298494577407837, 1.7074564695358276, 1.7203125953674316, 1.6835048198699951, 1.6871163845062256, 1.6632990837097168, 1.6550012826919556, 1.6463934183120728, 1.6104270219802856, 1.6046186685562134, 1.6057566404342651, 1.6030192375183105, 1.5999948978424072]]
+global_train_loss_algo = [[]]

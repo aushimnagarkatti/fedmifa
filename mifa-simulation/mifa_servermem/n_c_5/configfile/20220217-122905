@@ -21,7 +21,7 @@ model_type = 'r' #shakespeare_lstm' #'shakespeare_lstm'#'cnnmnist'#'cnnmnist' #'
 dataset = 'cifar100'
 
 #Plotting
-plot_every_n = 20
+plot_every_n = 50
 
 
 

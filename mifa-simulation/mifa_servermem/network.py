@@ -29,7 +29,7 @@ class BasicBlock(nn.Module):
         out = F.relu(out)
         return out
 class ResNet(nn.Module):
-    def __init__(self, block, num_blocks, num_classes=10):
+    def __init__(self, block, num_blocks, num_classes=100):
         super(ResNet, self).__init__()
         self.in_planes = 64
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
@@ -138,7 +138,8 @@ class ShakespeareLstm(torch.nn.Module):
 
         # shape of input/output tensors: (batch_dim, seq_dim, feature_dim)
         self.rnn = torch.nn.GRU(embedding_dim, self.hidden_dim, n_recurrent_layers, batch_first=True)
-        self.fc = torch.nn.Linear(self.hidden_dim, output_dim)
+        self.fc = torch.nn
+        (self.hidden_dim, output_dim)
 
 
     def forward(self, x):

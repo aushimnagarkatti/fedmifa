@@ -5,23 +5,23 @@ import numpy as np
 batch_size= 64 #Neural Network batch size
 n_rnds= 1500 #Global rounds
 tau=5 #Local rounds --> not in use since we use local epochs
-total_c= 100 #250 #Total no of clients
-no_of_c=[5] #participating clients
+total_c= 250 #250 #Total no of clients
+no_of_c=[2] #participating clients
 local_epochs = 5 
 plot_local_train_loss = True
 
 
 #Cluster
 K= 36 #55        #try for 5,10,20. Number of clusters is predetermined for static
-cluster = 1
+cluster = 0
 clust_mech = 'static' #'static 
 
 #Model
-model_type = 'r' #shakespeare_lstm' #'shakespeare_lstm'#'cnnmnist'#'cnnmnist' #'r'
-dataset = 'cifar100'
+model_type = 'shakespeare_lstm' #shakespeare_lstm' #'shakespeare_lstm'#'cnnmnist'#'cnnmnist' #'r'
+dataset = 'shakespeare'
 
 #Plotting
-plot_every_n = 20
+plot_every_n = 50
 
 
 
