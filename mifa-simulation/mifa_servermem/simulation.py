@@ -12,6 +12,7 @@ import torch
 from torch._C import _nccl_all_reduce
 import network
 from torch.utils.data import Dataset, DataLoader
+from torch.nn.utils import parameters_to_vector, vector_to_parameters
 #import data
 import torch.nn as nn
 import numpy as np
@@ -63,19 +64,23 @@ def noniid_partition(dataset, num_users, lab_per_user, coarse_labels = None):
             a = np.sort([labels[dict_users[i][0]],labels[dict_users[i][num_imgs]]])
             a = (a[0],a[1])
 
-        # print (a)
-        if(a in dict_cluster):
-            cluster_id[i] = dict_cluster[a]
-        else:
-            dict_cluster[a] = dict_cluster_counter
-            cluster_id[i] = dict_cluster[a]
-            dict_cluster_counter = dict_cluster_counter + 1
+            # print (a)
+            if(a in dict_cluster):
+                cluster_id[i] = dict_cluster[a]
+            else:
+                dict_cluster[a] = dict_cluster_counter
+                cluster_id[i] = dict_cluster[a]
+                dict_cluster_counter = dict_cluster_counter + 1
+        dict_cluster_counter +=1
 
     if lab_per_user == 1:
         cluster_id = []
         for i in range(num_users):
             cluster_id.append(coarse_labels[dict_users[i][0]])
-    dict_cluster_counter = len(set(cluster_id))
+        dict_cluster_counter = len(set(cluster_id))
+    # dict_cluster_counter = 1
+    # for i in range(len(cluster_id)):
+    #     cluster_id[i] = 0
     return dict_users, cluster_id, dict_cluster_counter
 
 class Server():
@@ -288,66 +293,72 @@ class Server():
       
 
     def UMIFA(self, ids, client_models):
+        
+        umifa_step = copy.deepcopy(self.layers_init)
+        running_avg_t = copy.deepcopy(self.running_av_grads)
+        #add grads from present clients to running avg
+            
+        for client in ids:
+            # sum = 0
+            # spr = 0
+            alllayer_grads = client_models[client].local_grad_update
+            for layer in self.running_av_grads:
+                layer_grad = alllayer_grads[layer].cpu()
+                prevgrad = self.clients_alllayer_prevgrad[client][layer].cpu()
+                umifa_step[layer] += (running_avg_t[layer] + (layer_grad - prevgrad))/self.n_c
+                self.running_av_grads[layer] += (layer_grad - prevgrad)/self.total_c                
+                self.clients_alllayer_prevgrad[client][layer] = copy.deepcopy(alllayer_grads[layer])
+            #     sum+=np.linalg.norm(prevgrad)
+            #     spr+=np.linalg.norm(layer_grad)
+            # print(client,"Cluster num: ", "Grad norm: ", sum, spr)
+        return umifa_step
+        
 
-        if self.cluster ==0:
-            umifa_step = copy.deepcopy(self.layers_init)
-            running_avg_t = copy.deepcopy(self.running_av_grads)
-            #add grads from present clients to running avg
-             
-            for client in ids:
-                # sum = 0
-                # spr = 0
-                alllayer_grads = client_models[client].local_grad_update
-                for layer in self.running_av_grads:
-                    layer_grad = alllayer_grads[layer].cpu()
-                    prevgrad = self.clients_alllayer_prevgrad[client][layer].cpu()
-                    umifa_step[layer] += (running_avg_t[layer] + (layer_grad - prevgrad))/self.n_c
-                    self.running_av_grads[layer] += (layer_grad - prevgrad)/self.total_c                
-                    self.clients_alllayer_prevgrad[client][layer] = copy.deepcopy(alllayer_grads[layer])
-                #     sum+=np.linalg.norm(prevgrad)
-                #     spr+=np.linalg.norm(layer_grad)
-                # print(client,"Cluster num: ", "Grad norm: ", sum, spr)
-            return umifa_step
+    def UMIFA_static(self, ids, client_models):
+        clusts_freq = {}
+        umifa_step = copy.deepcopy(self.layers_init)
 
-        else:
-            clusts_freq = {}
-            umifa_step = copy.deepcopy(self.layers_init)
-            running_avg_t = copy.deepcopy(self.running_av_grads)
-            #add grads from present clients to running avg
-            for client in ids:
-                alllayer_grads = client_models[client].local_grad_update
-                
-                alllayer_prevgrads = self.get_cluster_prevgrad(client,client_models)
+        for client in range(config.total_c):
+            if client in ids:
+                alllayer_grads = copy.deepcopy(client_models[client].local_grad_update)
                 if self.dynamic_clust:
                     closest_clustcent = self.get_and_update_closest_clust_ind(client,client_models)
                 else:
                     closest_clustcent = client_models[client].cluster_center
                     if self.cluster_center_vals[closest_clustcent] == -1:
                         self.cluster_center_vals[closest_clustcent] = copy.deepcopy(self.layers_init)
+
                 clusts_freq.setdefault(closest_clustcent,0)
                 clusts_freq[closest_clustcent]+=1
-                # sum = 0
-                # spr = 0
-                for layer in self.running_av_grads:
-                    layer_grad = alllayer_grads[layer].cpu()
-                    prevgrad = alllayer_prevgrads[layer].cpu()
-                    # prevgrad_noclust = self.clients_alllayer_prevgrad[client][layer].cpu()
-                    umifa_step[layer] = (running_avg_t[layer] + layer_grad - prevgrad)/self.n_c
-                    self.running_av_grads[layer] += (layer_grad - prevgrad)/self.total_c  
-                    # self.clients_alllayer_prevgrad[client][layer] = copy.deepcopy(alllayer_grads[layer])# (0*self.cluster_center_vals[closest_clustcent][layer]) \
-                    
-                #     sum+=np.linalg.norm(prevgrad)
-                #     spr+=np.linalg.norm(layer_grad)
-                # print(client,"Cluster num: ",closest_clustcent, "Grad norm: ", sum, spr)
-            for clusts_hit, freq in clusts_freq.items():
-                self.cluster_center_vals[clusts_hit] = copy.deepcopy(self.layers_init)
-                for client in ids:
-                    if client_models[client].cluster_center == clusts_hit:
-                        alllayer_grads = client_models[client].local_grad_update
-                        for layer in self.cluster_center_vals[clusts_hit]:
-                            self.cluster_center_vals[clusts_hit][layer] += alllayer_grads[layer]/freq
-                    
-            return umifa_step
+
+            else:
+                alllayer_grads = self.get_cluster_prevgrad(client,client_models)
+
+            
+            # sum = 0
+            # spr = 0 
+            for layer in alllayer_grads:
+                if client in ids:
+                    # sum += np.linalg.norm(alllayer_grads[layer].cpu())
+                    # spr += np.linalg.norm(self.cluster_center_vals[closest_clustcent][layer]) 
+                    alllayer_grads[layer] = self.total_c*(alllayer_grads[layer] - self.cluster_center_vals[closest_clustcent][layer])/self.n_c 
+                umifa_step[layer] += alllayer_grads[layer].cpu()/self.total_c
+            #     sum+=np.linalg.norm(prevgrad)
+            #     spr+=np.linalg.norm(layer_grad)
+            # if client in ids:
+            #     print(client,"Cluster num: ",closest_clustcent, "cluster vs new Grad norm: ", spr, sum)
+
+        for clusts_hit, freq in clusts_freq.items():
+            self.cluster_center_vals[clusts_hit] = copy.deepcopy(self.layers_init)
+            for client in ids:
+                if client_models[client].cluster_center == clusts_hit:
+                    # sum =0
+                    alllayer_grads = copy.deepcopy(client_models[client].local_grad_update)
+                    for layer in self.cluster_center_vals[clusts_hit]:
+                        self.cluster_center_vals[clusts_hit][layer] += alllayer_grads[layer]/(freq)
+                    #     sum += np.linalg.norm(alllayer_grads[layer])
+                    # print("clsum", sum)
+        return umifa_step
 
 
     #ids are participating client IDS
@@ -366,6 +377,8 @@ class Server():
             step, delta_c_i = self.Scaffold(ids, client_models)
             for layer in self.c_i:
                 self.c_i[layer] += delta_c_i[layer]*(self.n_c/self.total_c)
+        elif algo ==4:
+            step = self.UMIFA_static(ids, client_models)
         
         else:
             print("Algo not valid: ", algo)
@@ -395,8 +408,7 @@ class Server():
         test_model.eval()
         #Over entire test set
         with torch.no_grad():
-            for i in range(l):
-                test_X, lab=next(iter(test_data_loader))
+            for test_X, lab in test_data_loader:
                 test_X = test_X.cuda()
                 #forward
                 out = test_model.forward(test_X)
@@ -408,6 +420,7 @@ class Server():
                 pred.extend(out)
                 actuals.extend(lab)
         loss = loss/l
+        # print(pred[0:100], actuals[0:100])
         accuracy = torch.count_nonzero(torch.Tensor(pred)== torch.Tensor(actuals))
         return accuracy/len(pred), loss
     
@@ -437,7 +450,7 @@ def plot_clusters(client_obj_dict, n_c, algo, timestr, num_clusters = config.K):
 
 
 def round_schedule(lr, rnd, lrfactor, sch_freq):
-    if rnd%sch_freq==0:
+    if rnd%sch_freq==0 and rnd!=0:
         return lr*lrfactor
     else:
          return lr
@@ -493,16 +506,18 @@ class Client():
 
 
     
-    def train(self,train_data_loader, tau,model, lr=0.1, algo = None, c = None, cnt = None):
+    def train(self,train_data_loader, optimizer, tau,model, lr=0.1, algo = None, c = None, cnt = None):
         avg_loss=0
         #print(self.model.state_dict())
         # print("\n\n\n\n")
-        optimizer = optim.SGD(model.parameters(), lr=lr, weight_decay=self.weightDecay)
+        
         model = model.cuda()
         
-        model.train()
+        
         for i, (train_X, lab) in enumerate(train_data_loader):
             cnt +=1
+            # print(lab)
+            # break
             #train_X.view(train_X.shape[0],3,32,32).cuda()
             #train_X = train_X.transpose(1,3).cuda() 
             train_X = train_X.cuda()
@@ -538,12 +553,15 @@ class Client():
         return loss, model, cnt
     
     def local_train(self,dtrain_loader,lr, model, algo = None, c = None):
+        # vec_prev = parameters_to_vector(model.parameters()).cpu()
         oldx = model.state_dict()
         loss =0
         cnt = 0
+        model.train()
+        optimizer = optim.SGD(model.parameters(), lr=lr)#, weight_decay=self.weightDecay)
         #train each client for local epochs
         for epoch in range(config.local_epochs):
-            loss_epoch, model_trained, cnt = self.train(dtrain_loader, tau, lr = lr, model = model, algo= algo, c=c, cnt = cnt)
+            loss_epoch, model_trained, cnt = self.train(dtrain_loader, optimizer, tau, lr = lr, model = model, algo= algo, c=c, cnt = cnt)
             loss+=loss_epoch
         newx = model_trained.cpu().state_dict()
         #print("loss",loss)
@@ -563,8 +581,13 @@ class Client():
             #now, delta_y is is stored in self.local_grad_update, delta_c_i in delta_c_i
 
         else:
-            for layer, val in newx.items():
-                self.local_grad_update[layer] = (newx[layer]-oldx[layer])
+            
+            
+            with torch.no_grad():
+                # vec_curr = parameters_to_vector(model_trained.parameters()).cpu()
+                # print("Client ", self.id,np.linalg.norm(vec_curr - vec_prev))
+                for layer, val in newx.items():
+                    self.local_grad_update[layer] = (newx[layer]-oldx[layer])
 
         return loss/config.local_epochs
     
@@ -733,21 +756,23 @@ if __name__ == "__main__":
     if config.dataset == 'cifar10':
         trans_cifar_train = transforms.Compose([transforms.ToTensor(), \
             #transforms.RandomCrop(24),
-            transforms.RandomHorizontalFlip(0.25),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+            # transforms.RandomHorizontalFlip(0.25),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+            ])
         trans_cifar_test = transforms.Compose([transforms.ToTensor(), \
             #transforms.CenterCrop(24),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+            ])
         
         dataset_train = datasets.CIFAR10('./data/cifar', train=True, download=True, transform=trans_cifar_train)
         dataset_test = datasets.CIFAR10('./data/cifar', train=False, download=True, transform=trans_cifar_test)
         dict_users, cluster_id, num_clusters = noniid_partition(dataset_train, config.total_c, 2)
 
     elif config.dataset == 'cifar100':
-        trans_cifar_train = transforms.Compose([transforms.ToTensor(), \
-            #transforms.RandomCrop(24),
-            transforms.RandomHorizontalFlip(0.25),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+        trans_cifar_train = transforms.Compose([transforms.RandomCrop(32, padding=4, padding_mode='reflect'), 
+                         transforms.RandomHorizontalFlip(), 
+                         transforms.ToTensor(), 
+                         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
         trans_cifar_test = transforms.Compose([transforms.ToTensor(), \
             #transforms.CenterCrop(24),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
@@ -866,7 +891,11 @@ if __name__ == "__main__":
         cmodel = lenet.LeNet()
     elif config.model_type == 'shakespeare_lstm':
         print('Shakespeare LSTM')
+        tempmodel = network.ShakespeareLstm(num_classes=NUM_LETTERS, default_batch_size = config.batch_size)
+        #Deepcopying this model results in errors
         cmodel = network.ShakespeareLstm(num_classes=NUM_LETTERS, default_batch_size = config.batch_size)
+        cmodel.load_state_dict(tempmodel.state_dict())
+        a = copy.deepcopy(cmodel)
     else:
         print('please choose a network')
 
@@ -904,10 +933,10 @@ if __name__ == "__main__":
             #Run simulation for each algorithm
             for algo in list(d_algo.keys()): 
 
-                global_lr = lr = config.algo_lr[algo][learning_rate]
-                
+                global_lr = 1
+                lr = config.algo_lr[algo][learning_rate]
                 print("--------------------------Algo: {0}------------------------------------".format(d_algo[algo]))     
-
+                
                 server = Server(choose_nc, total_c, global_lr, model = copy.deepcopy(cmodel),cluster = config.cluster, num_clusters= num_clusters, dynamic_clust = dynamic_clust)
                 client_object_dict = {}
 
@@ -935,7 +964,6 @@ if __name__ == "__main__":
                         idxs_users=idxs_users_allrounds[rnd]
                     # print("chosen clients",idxs_users)
                     idxs_len=len(idxs_users)
-
                     # #Obtain global weights
                     # global_state_dict=server.global_model.state_dict()
 

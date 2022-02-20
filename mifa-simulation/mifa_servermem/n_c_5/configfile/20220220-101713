@@ -14,14 +14,14 @@ plot_local_train_loss = True
 #Cluster
 K= 36 #55        #try for 5,10,20. Number of clusters is predetermined for static
 cluster = 1
-clust_mech = 'static' #'static 
+clust_mech = 'dynamic' #'static 
 
 #Model
-model_type = 'r' #shakespeare_lstm' #'shakespeare_lstm'#'cnnmnist'#'cnnmnist' #'r'
+model_type = 'lenet' #shakespeare_lstm' #'shakespeare_lstm'#'cnnmnist'#'cnnmnist' #'r'
 dataset = 'cifar10'
 
 #Plotting
-plot_every_n = 50
+plot_every_n = 20
 
 
 
@@ -31,7 +31,7 @@ algo_lr = {  #lr for each algo, length has to be the same for all algos
     1: [0.1],
     2: [0.1], #0.05
     3: [np.power(10,-1.5)],
-    4: [np.power(10,-1.5)]
+    4: [0.05]
     }
 
 lrfactor = {
@@ -51,8 +51,8 @@ d_algo = {
             # 0: "MIFA",
             # 1: "UMIFA",
             # 2: "FedAvg",
-            3: "scaffold",
-            4: "UMIFA static"
+            #3: "scaffold",
+            4: "UMIFA dynamic"
         }
 
 

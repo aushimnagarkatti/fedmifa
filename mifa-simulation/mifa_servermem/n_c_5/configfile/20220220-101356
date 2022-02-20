@@ -17,11 +17,11 @@ cluster = 1
 clust_mech = 'static' #'static 
 
 #Model
-model_type = 'r' #shakespeare_lstm' #'shakespeare_lstm'#'cnnmnist'#'cnnmnist' #'r'
+model_type = 'lenet' #shakespeare_lstm' #'shakespeare_lstm'#'cnnmnist'#'cnnmnist' #'r'
 dataset = 'cifar10'
 
 #Plotting
-plot_every_n = 50
+plot_every_n = 20
 
 
 

@@ -138,8 +138,7 @@ class ShakespeareLstm(torch.nn.Module):
 
         # shape of input/output tensors: (batch_dim, seq_dim, feature_dim)
         self.rnn = torch.nn.GRU(embedding_dim, self.hidden_dim, n_recurrent_layers, batch_first=True)
-        self.fc = torch.nn
-        (self.hidden_dim, output_dim)
+        self.fc = torch.nn.Linear(self.hidden_dim, output_dim)
 
 
     def forward(self, x):
