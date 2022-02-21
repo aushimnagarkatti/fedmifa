@@ -14,7 +14,7 @@ plot_local_train_loss = True
 
 #Cluster
 K= 36 #55        #try for 5,10,20. Number of clusters is predetermined for static
-cluster = 1
+cluster = 0
 clust_mech = 'static' #'static 
 
 #Model

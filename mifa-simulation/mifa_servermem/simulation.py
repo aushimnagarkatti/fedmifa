@@ -275,13 +275,13 @@ class Server():
         return step
 
 
-    def Scaffold(self, ids, client_models):
+    def Scaffold(self, ids, client_models, scaff_mods):
         
         step = copy.deepcopy(self.layers_init)
         c_i_step = copy.deepcopy(self.layers_init)
         #add grads from present clients to running avg
-        for client in ids:
-            alllayer_grads = client_models[client].local_grad_update
+        for ii, client in enumerate(ids):
+            alllayer_grads = scaff_mods[ii]
             alllayer_delta_ci = client_models[client].delta_c_i
             for layer in alllayer_grads:
                 layer_grad = alllayer_grads[layer].cpu()
@@ -341,7 +341,7 @@ class Server():
                 if client in ids:
                     # sum += np.linalg.norm(alllayer_grads[layer].cpu())
                     # spr += np.linalg.norm(self.cluster_center_vals[closest_clustcent][layer]) 
-                    alllayer_grads[layer] = self.total_c*(alllayer_grads[layer] - self.cluster_center_vals[closest_clustcent][layer])/self.n_c 
+                    alllayer_grads[layer] = self.cluster_center_vals[closest_clustcent][layer] + self.total_c*(alllayer_grads[layer] - self.cluster_center_vals[closest_clustcent][layer])/self.n_c 
                 umifa_step[layer] += alllayer_grads[layer].cpu()/self.total_c
             #     sum+=np.linalg.norm(prevgrad)
             #     spr+=np.linalg.norm(layer_grad)
@@ -362,7 +362,7 @@ class Server():
 
 
     #ids are participating client IDS
-    def aggregate(self, ids, client_models, algo):
+    def aggregate(self, ids, client_models, algo, scaff_mods):
         
         global_state_dict = self.global_model.state_dict()
 
@@ -374,7 +374,7 @@ class Server():
         elif algo ==2:
             step = self.FedAvg(ids, client_models)
         elif algo ==3:
-            step, delta_c_i = self.Scaffold(ids, client_models)
+            step, delta_c_i = self.Scaffold(ids, client_models, scaff_mods)
             for layer in self.c_i:
                 self.c_i[layer] += delta_c_i[layer]*(self.n_c/self.total_c)
         elif algo ==4:
@@ -568,16 +568,18 @@ class Client():
         epoch +=1
         if algo == 'scaffold':
             #store y_i in self.local_grad_update 
-            self.local_grad_update = copy.deepcopy(newx)
+            local_grad_update = copy.deepcopy(newx)
             
             #store delta y_is in self.local_grad_update
             #also populate c_i and delta c_i
             for layer, val in newx.items(): #torch.Tensor([0.0])#
-                new_c_i_layer = self.c_i[layer] - c[layer] + ((oldx[layer]-self.local_grad_update[layer])/(cnt*lr))
+                new_c_i_layer = self.c_i[layer] - c[layer] + ((oldx[layer]-local_grad_update[layer])/(cnt*lr))
                 self.delta_c_i.setdefault(layer, 0)
                 self.delta_c_i[layer] = new_c_i_layer-self.c_i[layer]
                 self.c_i[layer] = new_c_i_layer
-                self.local_grad_update[layer] -= oldx[layer]
+                local_grad_update[layer] -= oldx[layer]
+            
+            return local_grad_update, loss/config.local_epochs
             #now, delta_y is is stored in self.local_grad_update, delta_c_i in delta_c_i
 
         else:
@@ -589,7 +591,7 @@ class Client():
                 for layer, val in newx.items():
                     self.local_grad_update[layer] = (newx[layer]-oldx[layer])
 
-        return loss/config.local_epochs
+        return loss/config.local_epochs, None
     
         
     def setWeights(self, global_model_sd):
@@ -973,19 +975,27 @@ if __name__ == "__main__":
 
 
                     d_train_losses=0 #loss over all clients
+                    scaff_mods = []
                     for sel_idx in idxs_users:
                         #Get train loader
                         dtrain_loader = DataLoader(client_data_split_dict[sel_idx], batch_size=config.batch_size, shuffle=True)
-                        loss = client_object_dict[sel_idx].local_train(dtrain_loader, lr = lr,  model = copy.deepcopy(server.global_model), algo = d_algo[algo], c = copy.deepcopy(server.c_i))
+                        if algo==3:
+                            local_grad_up,loss = client_object_dict[sel_idx].local_train(dtrain_loader, lr = lr,  model = copy.deepcopy(server.global_model), algo = d_algo[algo], c = copy.deepcopy(server.c_i))
+                            scaff_mods.append(local_grad_up)
+                        else:
+                            loss, _ = client_object_dict[sel_idx].local_train(dtrain_loader, lr = lr,  model = copy.deepcopy(server.global_model), algo = d_algo[algo], c = copy.deepcopy(server.c_i))
                         # print(loss)
 
-
+                        
                         d_train_losses+=loss
                     d_train_losses /= idxs_len
 
                     
                     #aggregate at server
-                    server.aggregate(idxs_users, client_object_dict, algo)
+                    if algo==3:
+                        server.aggregate(idxs_users, client_object_dict, algo, scaff_mods)
+                    else:
+                        server.aggregate(idxs_users, client_object_dict, algo, None)
                     
                     #Uncomment 
                     
