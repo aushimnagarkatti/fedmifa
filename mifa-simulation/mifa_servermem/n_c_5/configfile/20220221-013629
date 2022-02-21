@@ -2,7 +2,7 @@ import lenet
 import numpy as np
 
 #Generic Hyp
-batch_size= 128
+batch_size= 64
  #Neural Network batch size
 n_rnds= 1500 #Global rounds
 tau=5 #Local rounds --> not in use since we use local epochs
@@ -22,7 +22,7 @@ model_type = 'r' #shakespeare_lstm' #'shakespeare_lstm'#'cnnmnist'#'cnnmnist' #'
 dataset = 'cifar10'
 
 #Plotting
-plot_every_n = 50
+plot_every_n = 20
 
 
 
@@ -49,11 +49,11 @@ sch_freq = 600 #scheduler every n rounds
 
 #select algos to run
 d_algo = {
-            0: "MIFA",
-            1: "UMIFA",
-            2: "FedAvg",
+            # 0: "MIFA",
+            # 1: "UMIFA",
+            # 2: "FedAvg",
             3: "scaffold",
-            4: "UMIFA static"
+            #4: "UMIFA static"
         }
 
 

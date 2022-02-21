@@ -9,6 +9,7 @@ from matplotlib.colors import LinearSegmentedColormap
 from numpy.random.mtrand import standard_cauchy
 from sklearn import cluster
 import torch
+import sys
 from torch._C import _nccl_all_reduce
 import network
 from torch.utils.data import Dataset, DataLoader
@@ -29,9 +30,30 @@ import copy
 from shutil import copyfile
 import config
 import os
-import gc
 import data_cifar10 as data
 from tqdm import tqdm
+import tracemalloc
+
+def get_size(obj, seen=None):
+    """Recursively finds size of objects"""
+    size = sys.getsizeof(obj)
+    print(size, type(obj))
+    if seen is None:
+        seen = set()
+    obj_id = id(obj)
+    if obj_id in seen:
+        return 0
+    # Important mark as seen *before* entering recursion to gracefully handle
+    # self-referential objects
+    seen.add(obj_id)
+    if isinstance(obj, dict):
+        size += sum([get_size(v, seen) for v in obj.values()])
+        size += sum([get_size(k, seen) for k in obj.keys()])
+    elif hasattr(obj, '__dict__'):
+        size += get_size(obj.__dict__, seen)
+    elif hasattr(obj, '__iter__') and not isinstance(obj, (str, bytes, bytearray)):
+        size += sum([get_size(i, seen) for i in obj])
+    return size
 
 def noniid_partition(dataset, num_users, lab_per_user, coarse_labels = None):
     """
@@ -138,15 +160,14 @@ class Server():
             dist+= torch.linalg.norm((vec1[layer] - vec2[layer]).view(-1), ord=1)/10
         return dist
 
-    def get_and_update_closest_clust_ind(self,client_id,client_obj):
+    def get_and_update_closest_clust_ind(self,client_id,client_obj,client_update_vect):
 
         #iterate over cluster centers (distance:l2)
         min_dist = float('inf')
         new_clust_cent = -1
-        client_update_vect = client_obj[client_id].local_grad_update
         for clust_key, clust_val in self.cluster_center_vals.items():
             if clust_val == -1:
-                self.cluster_center_vals[clust_key] = copy.deepcopy(client_obj[client_id].local_grad_update)
+                self.cluster_center_vals[clust_key] = copy.deepcopy(client_update_vect)
                 client_obj[client_id].cluster_center = clust_key
                 # print("New cluster found ",client_id, clust_key)
                 return clust_key
@@ -217,12 +238,12 @@ class Server():
         return step
 
         
-    def MIFA(self, ids, client_models):
+    def MIFA(self, ids, client_models, scaff_mods):
 
         #if self.cluster ==0:
         #sum grads from present clients
-            for client in ids:
-                alllayer_grads = client_models[client].local_grad_update
+            for ii, client in enumerate(ids):
+                alllayer_grads = scaff_mods[ii]
                 for layer in self.running_av_grads:
                     layer_grad = alllayer_grads[layer].cpu()
                     prevgrad = self.clients_alllayer_prevgrad[client][layer].cpu() 
@@ -262,12 +283,12 @@ class Server():
 
 
 
-    def FedAvg(self, ids, client_models):
+    def FedAvg(self, ids, client_models, scaff_mods):
         
         step = copy.deepcopy(self.layers_init)
         #add grads from present clients to running avg
-        for client in ids:
-            alllayer_grads = client_models[client].local_grad_update
+        for ii, client in enumerate(ids):
+            alllayer_grads = scaff_mods[ii]
             for layer in alllayer_grads:
                 layer_grad = alllayer_grads[layer].cpu()
                 step[layer] += layer_grad/self.n_c
@@ -275,14 +296,14 @@ class Server():
         return step
 
 
-    def Scaffold(self, ids, client_models, scaff_mods):
+    def Scaffold(self, ids, client_models, scaff_mods, delta_c_i):
         
         step = copy.deepcopy(self.layers_init)
         c_i_step = copy.deepcopy(self.layers_init)
         #add grads from present clients to running avg
         for ii, client in enumerate(ids):
             alllayer_grads = scaff_mods[ii]
-            alllayer_delta_ci = client_models[client].delta_c_i
+            alllayer_delta_ci = delta_c_i[ii]
             for layer in alllayer_grads:
                 layer_grad = alllayer_grads[layer].cpu()
                 layerdeltaci = alllayer_delta_ci[layer].cpu()
@@ -292,16 +313,16 @@ class Server():
         return step, c_i_step
       
 
-    def UMIFA(self, ids, client_models):
+    def UMIFA(self, ids, client_models, scaff_mods):
         
         umifa_step = copy.deepcopy(self.layers_init)
         running_avg_t = copy.deepcopy(self.running_av_grads)
         #add grads from present clients to running avg
             
-        for client in ids:
+        for ii, client in enumerate(ids):
             # sum = 0
             # spr = 0
-            alllayer_grads = client_models[client].local_grad_update
+            alllayer_grads = scaff_mods[ii]
             for layer in self.running_av_grads:
                 layer_grad = alllayer_grads[layer].cpu()
                 prevgrad = self.clients_alllayer_prevgrad[client][layer].cpu()
@@ -314,20 +335,21 @@ class Server():
         return umifa_step
         
 
-    def UMIFA_static(self, ids, client_models):
+    def UMIFA_static(self, ids, client_models, scaff_mods):
         clusts_freq = {}
         umifa_step = copy.deepcopy(self.layers_init)
-
+        ii =0
         for client in range(config.total_c):
             if client in ids:
-                alllayer_grads = copy.deepcopy(client_models[client].local_grad_update)
+                alllayer_grads = copy.deepcopy(scaff_mods[ii])
+                
                 if self.dynamic_clust:
-                    closest_clustcent = self.get_and_update_closest_clust_ind(client,client_models)
+                    closest_clustcent = self.get_and_update_closest_clust_ind(client,client_models,copy.deepcopy(scaff_mods[ii]))
                 else:
                     closest_clustcent = client_models[client].cluster_center
                     if self.cluster_center_vals[closest_clustcent] == -1:
                         self.cluster_center_vals[closest_clustcent] = copy.deepcopy(self.layers_init)
-
+                ii+=1
                 clusts_freq.setdefault(closest_clustcent,0)
                 clusts_freq[closest_clustcent]+=1
 
@@ -350,10 +372,10 @@ class Server():
 
         for clusts_hit, freq in clusts_freq.items():
             self.cluster_center_vals[clusts_hit] = copy.deepcopy(self.layers_init)
-            for client in ids:
+            for ii, client in enumerate(ids):
                 if client_models[client].cluster_center == clusts_hit:
                     # sum =0
-                    alllayer_grads = copy.deepcopy(client_models[client].local_grad_update)
+                    alllayer_grads = copy.deepcopy(scaff_mods[ii])
                     for layer in self.cluster_center_vals[clusts_hit]:
                         self.cluster_center_vals[clusts_hit][layer] += alllayer_grads[layer]/(freq)
                     #     sum += np.linalg.norm(alllayer_grads[layer])
@@ -362,23 +384,23 @@ class Server():
 
 
     #ids are participating client IDS
-    def aggregate(self, ids, client_models, algo, scaff_mods):
+    def aggregate(self, ids, client_models, algo, scaff_mods, delta_c_i):
         
         global_state_dict = self.global_model.state_dict()
 
         # print(self.global_model.state_dict())
         if algo == 0:
-            step = self.MIFA(ids, client_models)
+            step = self.MIFA(ids, client_models, scaff_mods)
         elif algo ==1:
-            step = self.UMIFA(ids, client_models)
+            step = self.UMIFA(ids, client_models, scaff_mods)
         elif algo ==2:
-            step = self.FedAvg(ids, client_models)
+            step = self.FedAvg(ids, client_models, scaff_mods)
         elif algo ==3:
-            step, delta_c_i = self.Scaffold(ids, client_models, scaff_mods)
+            step, delta_c_i_step = self.Scaffold(ids, client_models, scaff_mods, delta_c_i)
             for layer in self.c_i:
-                self.c_i[layer] += delta_c_i[layer]*(self.n_c/self.total_c)
+                self.c_i[layer] += delta_c_i_step[layer]*(self.n_c/self.total_c)
         elif algo ==4:
-            step = self.UMIFA_static(ids, client_models)
+            step = self.UMIFA_static(ids, client_models, scaff_mods)
         
         else:
             print("Algo not valid: ", algo)
@@ -502,7 +524,6 @@ class Client():
         self.cluster_center = cluster_id_i
         self.local_grad_update = {}
         self.c_i = {}
-        self.delta_c_i = {}
 
 
     
@@ -558,6 +579,7 @@ class Client():
         loss =0
         cnt = 0
         model.train()
+        delta_c_i = {}
         optimizer = optim.SGD(model.parameters(), lr=lr)#, weight_decay=self.weightDecay)
         #train each client for local epochs
         for epoch in range(config.local_epochs):
@@ -574,24 +596,25 @@ class Client():
             #also populate c_i and delta c_i
             for layer, val in newx.items(): #torch.Tensor([0.0])#
                 new_c_i_layer = self.c_i[layer] - c[layer] + ((oldx[layer]-local_grad_update[layer])/(cnt*lr))
-                self.delta_c_i.setdefault(layer, 0)
-                self.delta_c_i[layer] = new_c_i_layer-self.c_i[layer]
+                delta_c_i.setdefault(layer, 0)
+                delta_c_i[layer] = new_c_i_layer-self.c_i[layer]
                 self.c_i[layer] = new_c_i_layer
                 local_grad_update[layer] -= oldx[layer]
             
-            return local_grad_update, loss/config.local_epochs
+            return local_grad_update, delta_c_i, loss/config.local_epochs
             #now, delta_y is is stored in self.local_grad_update, delta_c_i in delta_c_i
 
         else:
             
-            
+            local_grad_update = {}
             with torch.no_grad():
                 # vec_curr = parameters_to_vector(model_trained.parameters()).cpu()
                 # print("Client ", self.id,np.linalg.norm(vec_curr - vec_prev))
                 for layer, val in newx.items():
-                    self.local_grad_update[layer] = (newx[layer]-oldx[layer])
+                    local_grad_update.setdefault(layer, 0)
+                    local_grad_update[layer] = (newx[layer]-oldx[layer])
 
-        return loss/config.local_epochs, None
+        return local_grad_update, loss/config.local_epochs
     
         
     def setWeights(self, global_model_sd):
@@ -756,14 +779,16 @@ if __name__ == "__main__":
         
     # dtest_loader=data.get_test_data_loader(test_data, batch_size= batch_size)
     if config.dataset == 'cifar10':
-        trans_cifar_train = transforms.Compose([transforms.ToTensor(), \
-            #transforms.RandomCrop(24),
-            # transforms.RandomHorizontalFlip(0.25),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        trans_cifar_train = transforms.Compose([
+                transforms.RandomCrop(32, padding=4),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
             ])
-        trans_cifar_test = transforms.Compose([transforms.ToTensor(), \
-            #transforms.CenterCrop(24),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+
+        trans_cifar_test = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
             ])
         
         dataset_train = datasets.CIFAR10('./data/cifar', train=True, download=True, transform=trans_cifar_train)
@@ -954,8 +979,15 @@ if __name__ == "__main__":
                 rnd_test_loss = []
                 rnd_train_loss = []
 
+                
                 #Global epochs
                 for rnd in (range(config.n_rnds)): # each communication round
+                    size = 0
+                    # for c in client_object_dict:
+                    #     cs = get_size(client_object_dict[c])
+                    #     size +=cs
+                    #     print("Client " ,c, " ", cs)
+                    # print("total size ", size)
                     #schedule(server, mode = 'global')
                     #schedule()
                     lr = round_schedule(lr, rnd, lrfactor[algo], sch_freq)
@@ -976,15 +1008,19 @@ if __name__ == "__main__":
 
                     d_train_losses=0 #loss over all clients
                     scaff_mods = []
+                    delta_c_i_l = []
                     for sel_idx in idxs_users:
+
                         #Get train loader
                         dtrain_loader = DataLoader(client_data_split_dict[sel_idx], batch_size=config.batch_size, shuffle=True)
                         if algo==3:
-                            local_grad_up,loss = client_object_dict[sel_idx].local_train(dtrain_loader, lr = lr,  model = copy.deepcopy(server.global_model), algo = d_algo[algo], c = copy.deepcopy(server.c_i))
+                            local_grad_up, delta_c_i, loss = client_object_dict[sel_idx].local_train(dtrain_loader, lr = lr,  model = copy.deepcopy(server.global_model), algo = d_algo[algo], c = copy.deepcopy(server.c_i))
                             scaff_mods.append(local_grad_up)
+                            delta_c_i_l.append(delta_c_i)
                         else:
-                            loss, _ = client_object_dict[sel_idx].local_train(dtrain_loader, lr = lr,  model = copy.deepcopy(server.global_model), algo = d_algo[algo], c = copy.deepcopy(server.c_i))
-                        # print(loss)
+                            local_grad_up, loss = client_object_dict[sel_idx].local_train(dtrain_loader, lr = lr,  model = copy.deepcopy(server.global_model), algo = d_algo[algo], c = copy.deepcopy(server.c_i))
+                            scaff_mods.append(local_grad_up)
+                            # print(loss)
 
                         
                         d_train_losses+=loss
@@ -993,9 +1029,9 @@ if __name__ == "__main__":
                     
                     #aggregate at server
                     if algo==3:
-                        server.aggregate(idxs_users, client_object_dict, algo, scaff_mods)
+                        server.aggregate(idxs_users, client_object_dict, algo, scaff_mods, delta_c_i_l)
                     else:
-                        server.aggregate(idxs_users, client_object_dict, algo, None)
+                        server.aggregate(idxs_users, client_object_dict, algo, scaff_mods , None)
                     
                     #Uncomment 
                     
@@ -1014,18 +1050,36 @@ if __name__ == "__main__":
                         rnd_test_loss.append(val_loss)
                         print("Testing acc: ",acc, "Test loss: ", val_loss)
                         
-
+                        
+                    # if rnd%100 == 1:
+                    #     print("collecting")
+                    #     gc.collect()
+                    #     print("collected")
+                    
 
                     # if(rnd==100):
                     #     lr = lr/2
 
 
                     print("Rnd {4} - Training Error: {0}, Algo: {2}, n_c: {3}, lr: {1}\n".format(d_train_losses,lr, algo, choose_nc, rnd))
+                    # #mem leak
+                    # snapshot = tracemalloc.take_snapshot()
+                    # top_stats = snapshot.statistics('traceback')
+
+                    # # pick the biggest memory block
+                    # stat = top_stats[0]
+                  
+
                 loss_algo.append(local_rnd_loss)  
                 acc_algo.append(local_rnd_acc) 
                 test_loss_algo.append(rnd_test_loss)
                 global_train_loss_algo.append(rnd_train_loss)
                 plot_clusters(client_object_dict, choose_nc,algo, timestr, num_clusters = num_clusters)
+
+
+                
+
+
             loss_eachlr.append(loss_algo)
             acc_eachlr.append(acc_algo)
             test_loss_eachlr.append(test_loss_algo)

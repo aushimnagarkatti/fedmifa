@@ -2,7 +2,7 @@ import lenet
 import numpy as np
 
 #Generic Hyp
-batch_size= 128
+batch_size= 64
  #Neural Network batch size
 n_rnds= 1500 #Global rounds
 tau=5 #Local rounds --> not in use since we use local epochs
@@ -18,29 +18,29 @@ cluster = 1
 clust_mech = 'static' #'static 
 
 #Model
-model_type = 'r' #shakespeare_lstm' #'shakespeare_lstm'#'cnnmnist'#'cnnmnist' #'r'
+model_type = 'lenet' #shakespeare_lstm' #'shakespeare_lstm'#'cnnmnist'#'cnnmnist' #'r'
 dataset = 'cifar10'
 
 #Plotting
-plot_every_n = 50
+plot_every_n = 20
 
 
 
 #Learning rate
 algo_lr = {  #lr for each algo, length has to be the same for all algos
-    0: [0.05],
-    1: [0.05],
-    2: [0.05], #0.05
-    3: [0.05],
-    4: [0.05]
+    0: [0.06],
+    1: [0.06],
+    2: [0.06], #0.05
+    3: [0.06],
+    4: [0.06]
     }
 
 lrfactor = {
-    0:0.5, #factor to reduce lr in scheduler
-    1:0.5,
-    2:0.5,
-    3:0.5,
-    4:0.5
+    0:0., #factor to reduce lr in scheduler
+    1:0.6,
+    2:0.6,
+    3:0.6,
+    4:0.6
     }
 
 sch_freq = 600 #scheduler every n rounds
@@ -49,11 +49,11 @@ sch_freq = 600 #scheduler every n rounds
 
 #select algos to run
 d_algo = {
-            0: "MIFA",
-            1: "UMIFA",
-            2: "FedAvg",
+            # 0: "MIFA",
+            # 1: "UMIFA",
+            # 2: "FedAvg",
             3: "scaffold",
-            4: "UMIFA static"
+            #4: "UMIFA static"
         }
 
 
